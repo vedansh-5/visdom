@@ -34,6 +34,7 @@ import {
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
+import UserDropdown from './topbar/UserDropdown';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
@@ -867,9 +868,17 @@ const App = () => {
           }}
         >
           {filterControl}
-          &nbsp;&nbsp;
+          
+        &nbsp;&nbsp;
+        <span className='vertical-line' />
+        &nbsp;&nbsp;
+        <UserDropdown/>
+        &nbsp;&nbsp;
+
           {connectionIndicator}
         </span>
+
+        
       </div>
       <div
         tabIndex="-1"
