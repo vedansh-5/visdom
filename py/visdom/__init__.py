@@ -1594,9 +1594,11 @@ class Visdom(object):
                     "updating by name should" "have 1-dim or 2-dim X."
                 )
                 if X.ndim == 1:
-                    assert (
-                        Y.ndim == 1
-                    ), "update by name should have 1-dim Y when X is 1-dim"
+                    assert Y is not None, "Y must be provided when X is 1-dim"
+
+                    Y = np.asarray(Y)
+                    Y = np.ravel(Y)  # Flatten (N, 1) -> (N,)
+                    assert Y.ndim == 1, "Y must be 1-dim after flattening"
                     assert X.shape[0] == Y.shape[0], "X and Y should have same shape"
                     X = np.column_stack((X, Y))
                     Y = None
