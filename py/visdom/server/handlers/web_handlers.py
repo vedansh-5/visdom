@@ -422,7 +422,8 @@ class DeleteEnvHandler(BaseHandler):
             del handler.state[eid]
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                os.remove(p)
+                if os.path.exists(p):
+                    os.remove(p)
             broadcast_envs(handler)
 
     @check_auth

@@ -23,15 +23,19 @@ function EnvModal(props) {
 
   // change input / select value when activeEnv changes
   const [inputText, setInputText] = useState(activeEnv);
-  const [selectText, setSelectText] = useState(activeEnv);
+  const [selectText, setSelectText] = useState([activeEnv]);
   useEffect(() => {
     setInputText(activeEnv);
-    setSelectText(activeEnv);
+    setSelectText([activeEnv]);
   }, [activeEnv]);
 
   // rendering
   // ---------
 
+  const selectableEnvs = envList.filter(env => env !== 'main');
+  const isAllSelected = 
+    selectableEnvs.length > 0 && 
+    selectableEnvs.every((env) => selectText.includes(env));
   return (
     <ReactModal
       isOpen={show}
@@ -64,29 +68,61 @@ function EnvModal(props) {
       <br />
       Delete environment selected in dropdown:
       <br />
-      <div className="form-inline">
-        <select
-          className="form-control"
-          disabled={!connected}
-          value={selectText}
-          onChange={(ev) => {
-            setSelectText(ev.target.value);
-          }}
-        >
-          {envList.map((env) => {
-            return (
-              <option key={env} value={env}>
-                {env}
-              </option>
-            );
-          })}
-        </select>
+     <div className="form-inline">
+        <div style={{ border: '1px solid #ccc', padding: '10px', height: '140px', overflowY: 'scroll', marginBottom: '10px', width: '100%', borderRadius: '4px', backgroundColor: '#fff' }}>
+          
+          <label style={{ display: 'block', fontWeight: 'bold', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              style={{ marginRight: '8px' }}
+              disabled={!connected || selectableEnvs.length === 0}
+              checked={isAllSelected}
+              onChange={(ev) => {
+                setSelectText(ev.target.checked ? selectableEnvs : []);
+              }}
+            />
+            Select All
+          </label>
+          <hr style={{ margin: '5px 0' }} />
+
+          {envList.map((env) => (
+            <label key={env} style={{ display: 'block', fontWeight: 'normal', cursor: env === 'main' ? 'not-allowed' : 'pointer', color: env === 'main' ? '#999' : '#333' }}>
+              <input
+                type="checkbox"
+                style={{ marginRight: '8px' }}
+                value={env}
+                disabled={!connected || env === 'main'}
+                checked={selectText.includes(env)}
+                onChange={(ev) => {
+                  if (ev.target.checked) {
+                    setSelectText([...selectText, env]);
+                  } else {
+                    setSelectText(selectText.filter(e => e !== env));
+                  }
+                }}
+              />
+              {env} {env === 'main' && <span style={{ fontSize: '0.8em' }}>(protected)</span>}
+            </label>
+          ))}
+        </div>
+
         <button
           className="btn btn-default"
-          disabled={!connected || !selectText || selectText == 'main'}
-          onClick={() => onEnvDelete(selectText, activeEnv)}
+          disabled={!connected || selectText.length === 0 || selectText.includes('main')}
+          onClick={() => {
+            // push active env to end so it does not affect queue
+            const sortedEnvs = [...selectText].sort((a,b) =>{
+              if (a==activeEnv) return 1;
+              if (b==activeEnv) return -1;
+              return 0;
+            })
+            sortedEnvs.forEach(env => {
+                onEnvDelete(env, activeEnv);
+            });
+            setSelectText([]);
+          }}
         >
-          Delete
+          Delete Selected
         </button>
       </div>
     </ReactModal>

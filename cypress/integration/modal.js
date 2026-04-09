@@ -57,8 +57,8 @@ describe('Test Env Modal', () => {
   it('Remove Env', () => {
     // delete fork
     cy.get(envbutton).click();
-    cy.get(envmodal + 'select').select(env + '_fork');
-    cy.contains('button', 'Delete').click();
+    cy.get(envmodal + 'input[value="' + env + '_fork"]').check();
+    cy.contains('button', 'Delete Selected').click();
     cy.get(envmodal).type('{esc}');
 
     // check that fork does not exist anymore
