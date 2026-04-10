@@ -422,8 +422,12 @@ class DeleteEnvHandler(BaseHandler):
             del handler.state[eid]
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                if os.path.exists(p):
+                try:
                     os.remove(p)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    logging.error(f"Failed to delte {p}: {e}")
             broadcast_envs(handler)
 
     @check_auth

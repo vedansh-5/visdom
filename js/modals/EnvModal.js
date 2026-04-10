@@ -23,10 +23,10 @@ function EnvModal(props) {
 
   // change input / select value when activeEnv changes
   const [inputText, setInputText] = useState(activeEnv);
-  const [selectText, setSelectText] = useState([activeEnv]);
+  const [selectText, setSelectText] = useState(activeEnv === 'main' ? [] : [activeEnv]);
   useEffect(() => {
     setInputText(activeEnv);
-    setSelectText([activeEnv]);
+    setSelectText(activeEnv === 'main' ? [] : [activeEnv]);
   }, [activeEnv]);
 
   // rendering
@@ -66,7 +66,7 @@ function EnvModal(props) {
         </button>
       </div>
       <br />
-      Delete environment selected in dropdown:
+      Select environments to delete:
       <br />
      <div className="form-inline">
         <div style={{ border: '1px solid #ccc', padding: '10px', height: '140px', overflowY: 'scroll', marginBottom: '10px', width: '100%', borderRadius: '4px', backgroundColor: '#fff' }}>
@@ -95,9 +95,9 @@ function EnvModal(props) {
                 checked={selectText.includes(env)}
                 onChange={(ev) => {
                   if (ev.target.checked) {
-                    setSelectText([...selectText, env]);
+                    setSelectText(prev => Array.from(new Set([...prev, env])));
                   } else {
-                    setSelectText(selectText.filter(e => e !== env));
+                    setSelectText(prev => prev.filter(e => e !== env));
                   }
                 }}
               />
@@ -110,12 +110,11 @@ function EnvModal(props) {
           className="btn btn-default"
           disabled={!connected || selectText.length === 0 || selectText.includes('main')}
           onClick={() => {
-            // push active env to end so it does not affect queue
-            const sortedEnvs = [...selectText].sort((a,b) =>{
-              if (a==activeEnv) return 1;
-              if (b==activeEnv) return -1;
-              return 0;
-            })
+            // push active env at last to prevent breaking the queue
+            let sortedEnvs = selectText.filter(env => env !== activeEnv);
+            if (selectText.includes(activeEnv)) {
+                sortedEnvs.push(activeEnv);
+            }
             sortedEnvs.forEach(env => {
                 onEnvDelete(env, activeEnv);
             });

@@ -122,8 +122,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 del self.state[msg["eid"]]
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
-                    if os.path.exists(p):
+                    try:
                         os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delte {p}: {e}")
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
