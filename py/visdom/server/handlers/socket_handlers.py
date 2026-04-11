@@ -119,7 +119,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "delete_env":
             if "eid" in msg:
                 logging.info(f"closing environment {msg['eid']}")
-                del self.state[msg["eid"]]
+                self.state.pop(msg["eid"], None)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
                     try:
@@ -127,7 +127,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     except FileNotFoundError:
                         pass
                     except OSError as e:
-                        logging.error(f"Failed to delte {p}: {e}")
+                        logging.error(f"Failed to delete {p}: {e}")
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":

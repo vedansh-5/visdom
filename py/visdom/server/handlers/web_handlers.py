@@ -419,7 +419,7 @@ class DeleteEnvHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
         if eid is not None:
-            del handler.state[eid]
+            handler.state.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
                 try:
@@ -427,7 +427,7 @@ class DeleteEnvHandler(BaseHandler):
                 except FileNotFoundError:
                     pass
                 except OSError as e:
-                    logging.error(f"Failed to delte {p}: {e}")
+                    logging.error(f"Failed to delete {p}: {e}")
             broadcast_envs(handler)
 
     @check_auth

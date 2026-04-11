@@ -23,19 +23,20 @@ function EnvModal(props) {
 
   // change input / select value when activeEnv changes
   const [inputText, setInputText] = useState(activeEnv);
-  const [selectText, setSelectText] = useState(activeEnv === 'main' ? [] : [activeEnv]);
+  const [selectedEnvs, setSelectedEnvs] = useState(activeEnv === 'main' ? [] : [activeEnv]);
   useEffect(() => {
     setInputText(activeEnv);
-    setSelectText(activeEnv === 'main' ? [] : [activeEnv]);
+    setSelectedEnvs(activeEnv === 'main' ? [] : [activeEnv]);
   }, [activeEnv]);
 
   // rendering
   // ---------
 
   const selectableEnvs = envList.filter(env => env !== 'main');
+  const selectedEnvsSet = new Set(selectedEnvs);
   const isAllSelected = 
     selectableEnvs.length > 0 && 
-    selectableEnvs.every((env) => selectText.includes(env));
+    selectableEnvs.every((env) => selectedEnvsSet.has(env));
   return (
     <ReactModal
       isOpen={show}
@@ -78,7 +79,7 @@ function EnvModal(props) {
               disabled={!connected || selectableEnvs.length === 0}
               checked={isAllSelected}
               onChange={(ev) => {
-                setSelectText(ev.target.checked ? selectableEnvs : []);
+                setSelectedEnvs(ev.target.checked ? selectableEnvs : []);
               }}
             />
             Select All
@@ -92,12 +93,14 @@ function EnvModal(props) {
                 style={{ marginRight: '8px' }}
                 value={env}
                 disabled={!connected || env === 'main'}
-                checked={selectText.includes(env)}
+                checked={selectedEnvsSet.has(env)}
                 onChange={(ev) => {
                   if (ev.target.checked) {
-                    setSelectText(prev => Array.from(new Set([...prev, env])));
+                    setSelectedEnvs((prev) => 
+                    Array.from(new Set([...prev, env]))
+                  );
                   } else {
-                    setSelectText(prev => prev.filter(e => e !== env));
+                    setSelectedEnvs(prev => prev.filter(e => e !== env));
                   }
                 }}
               />
@@ -108,17 +111,17 @@ function EnvModal(props) {
 
         <button
           className="btn btn-default"
-          disabled={!connected || selectText.length === 0 || selectText.includes('main')}
+          disabled={!connected || selectedEnvs.length === 0 || selectedEnvsSet.has('main')}
           onClick={() => {
             // push active env at last to prevent breaking the queue
-            let sortedEnvs = selectText.filter(env => env !== activeEnv);
-            if (selectText.includes(activeEnv)) {
+            let sortedEnvs = selectedEnvs.filter(env => env !== activeEnv);
+            if (selectedEnvsSet.has(activeEnv)) {
                 sortedEnvs.push(activeEnv);
             }
             sortedEnvs.forEach(env => {
                 onEnvDelete(env, activeEnv);
             });
-            setSelectText([]);
+            setSelectedEnvs([]);
           }}
         >
           Delete Selected
