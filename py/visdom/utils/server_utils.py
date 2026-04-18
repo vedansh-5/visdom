@@ -143,7 +143,7 @@ def escape_eid(eid):
     """Replace slashes with underscores, to avoid recognizing them
     as directories.
     """
-    return eid.replace("/", "_")
+    return eid.replace("/", "_").replace("\\", "_")
 
 
 def extract_eid(args):
@@ -249,8 +249,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, "{0}.json".format(eid.strip()))
-            if os.path.exists(p):
+            safe_eid = escape_eid(eid.strip())
+            p = os.path.abspath(os.path.join(env_path, "{0}.json".format(safe_eid)))
+            if p.startswith(os.path.abspath(env_path)) and os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
@@ -393,8 +394,9 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, "{0}.json".format(eid.strip()))
-        if os.path.exists(p):
+        safe_eid = escape_eid(eid.strip())
+        p = os.path.abspath(os.path.join(env_path, "{0}.json".format(safe_eid)))
+        if p.startswith(os.path.abspath(env_path)) and os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env

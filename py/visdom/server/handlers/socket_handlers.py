@@ -292,7 +292,7 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
                     "command": "register",
                     "data": self.sid,
                     "readonly": self.readonly,
-                    "envList": list(self.state.keys()),
+                    "envList": sorted(list(self.state.keys())),
                 }
             )
         )
