@@ -167,8 +167,9 @@ class Application(tornado.web.Application):
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
+            is_hashed = env_json.startswith("hash_")
 
-            if self.eager_data_loading:
+            if self.eager_data_loading or is_hashed:
                 try:
                     with open(env_path_file, "r") as fn:
                         env_data = tornado.escape.json_decode(fn.read())
@@ -180,7 +181,16 @@ class Application(tornado.web.Application):
                     )
                     continue
 
-                state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+                if is_hashed and "name" in env_data:
+                    eid = env_data["name"]
+
+                state[eid] = {
+                    "jsons": env_data.get("jsons", {}),
+                    "reload": env_data.get("reload", {}),
+                }
+
+                if is_hashed and "name" not in env_data:
+                    pass
             else:
                 state[eid] = LazyEnvData(env_path_file)
 

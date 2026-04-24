@@ -15,6 +15,8 @@ in the previous server.py class.
 """
 
 
+import tornado
+import hashlib
 import copy
 import hashlib
 import json
@@ -120,11 +122,25 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
         for env_id in env_ids:
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            with open(env_path_file, "w") as fn:
-                if isinstance(state[env_id], LazyEnvData):
-                    fn.write(json.dumps(state[env_id]._raw_dict))
-                else:
-                    fn.write(json.dumps(state[env_id]))
+            try:
+                with open(env_path_file, "w") as fn:
+                    if isinstance(state[env_id], LazyEnvData):
+                        fn.write(json.dumps(state[env_id]._raw_dict))
+                    else:
+                        fn.write(json.dumps(state[env_id]))
+            except OSError:
+                hashed_id = hashlib.md5(env_id.encode("utf-8")).hexdigest()
+                env_path_file = os.path.join(
+                    env_path, "hash_{0}.json".format(hashed_id)
+                )
+                with open(env_path_file, "w") as fn:
+                    if isinstance(state[env_id], LazyEnvData):
+                        data_to_save = copy.deepcopy(state[env_id]._raw_dict)
+                    else:
+                        data_to_save = copy.deepcopy(state[env_id])
+                    data_to_save["name"] = env_id
+                    fn.write(json.dumps(data_to_save))
+
     return env_ids
 
 
@@ -229,7 +245,11 @@ def window(args):
 
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
-        items = [i.replace(".json", "") for i in os.listdir(env_path) if ".json" in i]
+        items = [
+            i.replace(".json", "")
+            for i in os.listdir(env_path)
+            if ".json" in i and not i.startswith("hash_")
+        ]
     else:
         items = []
     return sorted(list(set(items + list(state.keys()))))
@@ -244,12 +264,20 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, eid.strip(), ".json")
+            p = os.path.join(env_path, "{0}.json".format(eid.strip()))
             if os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
                     envs[eid] = env
+            else:
+                hashed_id = hashlib.md5(eid.strip().encode("utf-8")).hexdigest()
+                p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
+                if os.path.exists(p):
+                    with open(p, "r") as fn:
+                        env = tornado.escape.json_decode(fn.read())
+                        state[eid] = env
+                        envs[eid] = env
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
@@ -382,11 +410,18 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, eid.strip(), ".json")
+        p = os.path.join(env_path, "{0}.json".format(eid.strip()))
         if os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
+        else:
+            hashed_id = hashlib.md5(eid.strip().encode("utf-8")).hexdigest()
+            p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
+            if os.path.exists(p):
+                with open(p, "r") as fn:
+                    env = tornado.escape.json_decode(fn.read())
+                    state[eid] = env
 
     if "reload" in env:
         socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
