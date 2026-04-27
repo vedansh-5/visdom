@@ -39,6 +39,8 @@ updates:
       include: "scope"
     groups:
       pip-all-minor-patch:
+        patterns:
+          - "*"
         update-types:
           - "minor"
           - "patch"
