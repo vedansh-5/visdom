@@ -122,6 +122,7 @@ function EnvModal(props) {
                 onEnvDelete(env, activeEnv);
             });
             setSelectedEnvs([]);
+            onModalClose();
           }}
         >
           Delete Selected
