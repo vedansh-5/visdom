@@ -128,8 +128,11 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                         fn.write(json.dumps(state[env_id]._raw_dict))
                     else:
                         fn.write(json.dumps(state[env_id]))
-            except OSError:
-                hashed_id = hashlib.md5(env_id.encode("utf-8")).hexdigest()
+            except OSError as e:
+                import errno
+                if e.errno not in (errno.ENAMETOOLONG, 206) and len(env_id) < 200:
+                    raise
+                hashed_id = hashlib.sha256(env_id.encode("utf-8")).hexdigest()
                 env_path_file = os.path.join(
                     env_path, "hash_{0}.json".format(hashed_id)
                 )
@@ -246,10 +249,11 @@ def window(args):
 
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
+        import re
         items = [
-            i.replace(".json", "")
+            i[:-5]
             for i in os.listdir(env_path)
-            if ".json" in i and not i.startswith("hash_")
+            if i.endswith(".json") and not re.match(r"^hash_[a-fA-F0-9]{64}\.json$", i)
         ]
     else:
         items = []
@@ -272,7 +276,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
                     envs[eid] = env
             else:
-                hashed_id = hashlib.md5(eid.encode("utf-8")).hexdigest()
+                hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
                 p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
                 if os.path.exists(p):
                     with open(p, "r") as fn:
@@ -417,7 +421,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
         else:
-            hashed_id = hashlib.md5(eid.encode("utf-8")).hexdigest()
+            hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
             p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
             if os.path.exists(p):
                 with open(p, "r") as fn:

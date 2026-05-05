@@ -127,7 +127,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     else:
                         import hashlib
 
-                        hashed_id = hashlib.md5(msg["eid"].encode("utf-8")).hexdigest()
+                        hashed_id = hashlib.sha256(msg["eid"].encode("utf-8")).hexdigest()
                         p = os.path.join(
                             self.env_path, "hash_{0}.json".format(hashed_id)
                         )

@@ -167,7 +167,8 @@ class Application(tornado.web.Application):
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
-            is_hashed = env_json.startswith("hash_")
+            import re
+            is_hashed = bool(re.match(r"^hash_[a-f0-9]{64}\.json$", env_json))
 
             if self.eager_data_loading or is_hashed:
                 try:
