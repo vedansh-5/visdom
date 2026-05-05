@@ -23,11 +23,11 @@ function EnvModal(props) {
 
   // change input / select value when activeEnv changes
   const [inputText, setInputText] = useState(activeEnv);
-  const [selectedEnvs, setSelectedEnvs] = useState(activeEnv === 'main' ? [] : [activeEnv]);
+  const [selectedEnvs, setSelectedEnvs] = useState([]);
   useEffect(() => {
     setInputText(activeEnv);
-    setSelectedEnvs(activeEnv === 'main' ? [] : [activeEnv]);
-  }, [activeEnv]);
+    setSelectedEnvs([]);
+  }, [activeEnv, show]);
 
   // rendering
   // ---------
