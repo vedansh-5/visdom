@@ -130,6 +130,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                         fn.write(json.dumps(state[env_id]))
             except OSError as e:
                 import errno
+
                 if e.errno not in (errno.ENAMETOOLONG, 206) and len(env_id) < 200:
                     raise
                 hashed_id = hashlib.sha256(env_id.encode("utf-8")).hexdigest()
@@ -250,6 +251,7 @@ def window(args):
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
         import re
+
         items = [
             i[:-5]
             for i in os.listdir(env_path)
