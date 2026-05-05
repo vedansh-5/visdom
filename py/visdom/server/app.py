@@ -184,13 +184,24 @@ class Application(tornado.web.Application):
                 if is_hashed and "name" in env_data:
                     eid = env_data["name"]
 
+                if "jsons" not in env_data or "reload" not in env_data:
+                    logging.warning(
+                        "Environment file %s is malformed or missing expected fields.",
+                        env_path_file,
+                    )
+
                 state[eid] = {
                     "jsons": env_data.get("jsons", {}),
                     "reload": env_data.get("reload", {}),
                 }
 
                 if is_hashed and "name" not in env_data:
-                    pass
+                    logging.warning(
+                        "Hashed environment json missing 'name': %s; "
+                        "falling back to filename-derived env id '%s'",
+                        env_path_file,
+                        eid,
+                    )
             else:
                 state[eid] = LazyEnvData(env_path_file)
 

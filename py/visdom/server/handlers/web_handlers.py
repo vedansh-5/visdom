@@ -426,8 +426,6 @@ class DeleteEnvHandler(BaseHandler):
                 if os.path.exists(p):
                     os.remove(p)
                 else:
-                    import hashlib
-
                     hashed_id = hashlib.md5(eid.encode("utf-8")).hexdigest()
                     p = os.path.join(
                         handler.env_path, "hash_{0}.json".format(hashed_id)

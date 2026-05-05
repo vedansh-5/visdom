@@ -122,7 +122,17 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 del self.state[msg["eid"]]
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
-                    os.remove(p)
+                    if os.path.exists(p):
+                        os.remove(p)
+                    else:
+                        import hashlib
+
+                        hashed_id = hashlib.md5(msg["eid"].encode("utf-8")).hexdigest()
+                        p = os.path.join(
+                            self.env_path, "hash_{0}.json".format(hashed_id)
+                        )
+                        if os.path.exists(p):
+                            os.remove(p)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
