@@ -68,6 +68,9 @@ describe('Test Env Modal', () => {
     cy.contains('button', 'Delete Selected').click();
     cy.get(envmodal).should('not.exist');
 
+    // wait for polling cycle to deliver env_update (polling interval is 500ms)
+    cy.wait(1500);
+
     // check that both forks do not exist anymore, but original env still exists
     cy.get('.rc-tree-select').click();
     cy.get('span[title="' + env + '"]').should('exist');

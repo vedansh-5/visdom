@@ -206,8 +206,9 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        while len(self.messages) > 0:
-            message = self.messages.pop()
+        messages = self.messages
+        self.messages = []
+        for message in messages:
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
