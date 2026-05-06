@@ -417,8 +417,11 @@ class DeleteEnvHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = args.get("eid")
         if eid is not None:
+            eid = escape_eid(eid)
+            if eid == "main":
+                return
             handler.state.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))

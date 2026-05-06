@@ -118,10 +118,13 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "delete_env":
             if "eid" in msg:
-                logging.info(f"closing environment {msg['eid']}")
-                self.state.pop(msg["eid"], None)
+                eid = escape_eid(msg["eid"])
+                if eid == "main":
+                    return
+                logging.info(f"closing environment {eid}")
+                self.state.pop(eid, None)
                 if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
+                    p = os.path.join(self.env_path, "{0}.json".format(eid))
                     try:
                         os.remove(p)
                     except FileNotFoundError:
