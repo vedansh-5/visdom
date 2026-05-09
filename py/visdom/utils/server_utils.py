@@ -131,7 +131,10 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                     else:
                         fn.write(json.dumps(state[env_id]))
             except OSError as e:
-                if e.errno not in (errno.ENAMETOOLONG, 206) and len(env_id) < 200:
+                if (
+                    e.errno != errno.ENAMETOOLONG
+                    and getattr(e, "winerror", None) != 206
+                ):
                     raise
                 hashed_id = hashlib.sha256(env_id.encode("utf-8")).hexdigest()
                 env_path_file = os.path.join(

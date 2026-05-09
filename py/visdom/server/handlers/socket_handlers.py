@@ -119,21 +119,20 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "delete_env":
             if "eid" in msg:
-                logging.info(f"closing environment {msg['eid']}")
-                del self.state[msg["eid"]]
+                eid = escape_eid(msg["eid"])
+                logging.info(f"closing environment {eid}")
+                self.state.pop(eid, None)
                 if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
+                    p = os.path.join(self.env_path, "{0}.json".format(eid))
                     if os.path.exists(p):
                         os.remove(p)
                     else:
-                        hashed_id = hashlib.sha256(
-                            msg["eid"].encode("utf-8")
-                        ).hexdigest()
-                        p = os.path.join(
+                        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                        p_hashed = os.path.join(
                             self.env_path, "hash_{0}.json".format(hashed_id)
                         )
-                        if os.path.exists(p):
-                            os.remove(p)
+                        if os.path.exists(p_hashed):
+                            os.remove(p_hashed)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
