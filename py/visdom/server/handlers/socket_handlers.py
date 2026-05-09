@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import types
+import hashlib
 
 import tornado.ioloop
 import tornado.escape
@@ -125,8 +126,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     if os.path.exists(p):
                         os.remove(p)
                     else:
-                        import hashlib
-
                         hashed_id = hashlib.sha256(
                             msg["eid"].encode("utf-8")
                         ).hexdigest()

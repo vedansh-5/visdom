@@ -15,6 +15,7 @@ import logging
 import os
 import platform
 import time
+import re
 
 import tornado.web  # noqa E402: gotta install ioloop first
 import tornado.escape  # noqa E402: gotta install ioloop first
@@ -167,7 +168,6 @@ class Application(tornado.web.Application):
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
-            import re
 
             is_hashed = bool(re.match(r"^hash_[a-f0-9]{64}\.json$", env_json))
 
