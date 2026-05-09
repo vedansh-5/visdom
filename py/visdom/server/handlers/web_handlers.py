@@ -504,8 +504,6 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
-        items = gather_envs(self.state, env_path=self.env_path)
-        active = "" if eid not in items else eid
         self.render(
             "index.html",
             wrap_socket=self.wrap_socket,
@@ -538,11 +536,6 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def get(self, eids):
-        items = gather_envs(self.state)
-        eids = eids.split("+")
-        # Filter out eids that don't exist
-        eids = [x for x in eids if x in items]
-        eids = "+".join(eids)
         self.render(
             "index.html",
             wrap_socket=self.wrap_socket,
@@ -636,7 +629,6 @@ class IndexHandler(BaseHandler):
         self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -647,6 +639,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
+            items = gather_envs(self.state, env_path=self.env_path)
             self.render(
                 "login.html",
                 user=getpass.getuser(),

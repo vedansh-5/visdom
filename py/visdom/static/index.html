@@ -49,18 +49,16 @@ LICENSE file in the root directory of this source tree.
     var ENV_LIST = [];
     function getActiveEnvFromPath() {
       var path = window.location.pathname || '';
-      var match = path.match(/^\/env\/([^\/]+)$/);
-      if (match) {
+      if (path.includes('/env/')) {
         try {
-          return decodeURIComponent(match[1]);
+          return decodeURIComponent(path.split('/env/')[1]);
         } catch (e) {
           return '';
         }
       }
-      match = path.match(/^\/compare\/([^\/]+)$/);
-      if (match) {
+      if (path.includes('/compare/')) {
         try {
-          return decodeURIComponent(match[1]);
+          return decodeURIComponent(path.split('/compare/')[1]);
         } catch (e) {
           return '';
         }
