@@ -101,7 +101,7 @@ describe('Test View Modal', () => {
 
     // save the view at this point
     cy.get(viewbutton).click();
-    cy.get(viewmodal + 'input')
+    cy.get(viewmodal + 'input').eq(0)
       .clear()
       .type('first');
     cy.contains('button', 'fork').click();
@@ -120,7 +120,7 @@ describe('Test View Modal', () => {
 
     // save the view at this point
     cy.get(viewbutton).click();
-    cy.get(viewmodal + 'input')
+    cy.get(viewmodal + 'input').eq(0)
       .clear()
       .type('second');
     cy.contains('button', 'fork').click();
