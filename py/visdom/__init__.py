@@ -474,7 +474,12 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
-        self.env = env
+        self.env = (
+            env.replace("/", "_")
+            .replace("\\", "_")
+            .replace("\n", "_")
+            .replace("\r", "_")
+        )
         self.env_list = {f"{env}"}  # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events

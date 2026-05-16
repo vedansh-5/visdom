@@ -517,9 +517,11 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+                load_env(
+                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
+                )
         if "eid" in msg_args:
-            eid = msg_args["eid"]
+            eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
