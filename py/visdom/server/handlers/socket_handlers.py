@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import types
+from collections import deque
 
 import tornado.ioloop
 import tornado.escape
@@ -28,6 +29,7 @@ from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
     serialize_env,
+    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
@@ -116,6 +118,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
 
+        elif cmd == "save_all":
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, serialize_all, self.state, self.env_path
+            )
+
         elif cmd == "delete_env":
             if "eid" in msg:
                 eid = escape_eid(msg["eid"])
@@ -172,7 +179,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def initialize(self, app):
         super().initialize(app)
 
-        self.messages = []
+        self.messages = deque()
         self.last_read_time = time.time()
         self.open()
         try:
@@ -212,6 +219,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         messages = self.messages
         self.messages = []
         for message in messages:
+
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate

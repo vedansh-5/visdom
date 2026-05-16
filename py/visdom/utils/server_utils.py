@@ -16,6 +16,7 @@ in the previous server.py class.
 
 
 import copy
+import html
 import hashlib
 import json
 import logging
@@ -178,6 +179,7 @@ def window(args):
     opts = args.get("opts", {})
 
     ptype = args["data"][0]["type"]
+    is_visdom_type = "content" in args["data"][0]
 
     p = {
         "command": "window",
@@ -190,7 +192,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history":
+    if ptype == "image_history" and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
@@ -199,9 +201,9 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"]:
+    elif ptype in ["image", "text", "properties"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
-    elif ptype == "network":
+    elif ptype == "network" and is_visdom_type:
         p.update(
             {
                 "content": args["data"][0]["content"],
@@ -211,7 +213,7 @@ def window(args):
                 "showVertexLabels": opts.get("showVertexLabels", "hover"),
             }
         )
-    elif ptype in ["embeddings"]:
+    elif ptype in ["embeddings"] and is_visdom_type:
         p.update(
             {
                 "content": args["data"][0]["content"],
@@ -319,10 +321,13 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
     tableRows = [
-        "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v]) for v in eidNums
+        "<tr> <td> {} </td> <td> {} </td> </tr>".format(
+            html.escape(str(v)), html.escape(str(eidNums[v]))
+        )
+        for v in eidNums
     ]
 
-    tbl = """"<style>
+    tbl = """<style>
     table, th, td {{
         border: 1px solid black;
     }}
