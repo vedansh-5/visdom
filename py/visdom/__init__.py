@@ -480,7 +480,7 @@ class Visdom(object):
             .replace("\n", "_")
             .replace("\r", "_")
         )
-        self.env_list = {f"{env}"}  # default env
+        self.env_list = {self.env}  # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False

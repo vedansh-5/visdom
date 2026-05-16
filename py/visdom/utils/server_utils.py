@@ -268,6 +268,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     envs[eid] = env
 
     if not envs:
+        socket.write_message(json.dumps({"command": "layout"}))
+        socket.eid = eids
         return
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
