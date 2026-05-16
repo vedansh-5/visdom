@@ -651,6 +651,35 @@ const App = () => {
     }));
   };
 
+  const onLayoutCopy = (srcEnv, srcLayout, destLayout) => {
+    let layoutLists = storeMeta.layoutLists;
+
+    let srcLayoutMap = layoutLists.get(srcEnv);
+    if(!srcLayoutMap || !srcLayoutMap.has(srcLayout)) return;
+
+    let layoutData = srcLayoutMap.get(srcLayout);
+
+    // clone the layout map so src and dest don't share references
+    let clonedLayoutData = new Map(
+      Array.from(layoutData.entries(), ([key, value]) => [
+        key,
+        Array.isArray(value) ? [...value] : value,
+      ])
+    );
+
+    let currentEnv = selection.envIDs[0];
+    layoutLists.get(currentEnv).set(destLayout, clonedLayoutData);
+
+    sendLayoutsSave(layoutLists);
+
+    setStoreMeta((prev) => ({
+      ...prev,
+      layoutLists: layoutLists,
+    }));
+
+    updateToLayout(destLayout);
+  }
+
   // -------
   // effects
   // -------
@@ -783,6 +812,9 @@ const App = () => {
       key="ViewModal"
       activeLayout={selection.layoutID}
       layoutList={getCurrLayoutList()}
+      envList={storeMeta.envList}
+      allLayoutLists={storeMeta.layoutLists}
+      onLayoutCopy={onLayoutCopy.bind(this)}
       onModalClose={() => setShowViewModal(false)}
       onLayoutDelete={onLayoutDelete.bind(this)}
       onLayoutSave={onLayoutSave.bind(this)}
