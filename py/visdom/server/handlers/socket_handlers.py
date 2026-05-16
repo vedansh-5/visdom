@@ -219,7 +219,6 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         messages = self.messages
         self.messages = []
         for message in messages:
-
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
