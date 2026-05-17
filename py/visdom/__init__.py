@@ -477,8 +477,8 @@ class Visdom(object):
         self.env = (
             env.replace("/", "_")
             .replace("\\", "_")
-            .replace("\n", "_")
-            .replace("\r", "_")
+            .replace("\n", "-")
+            .replace("\r", "-")
         )
         self.env_list = {self.env}  # default env
         self.send = send

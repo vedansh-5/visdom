@@ -140,12 +140,12 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 def escape_eid(eid):
-    """Replace forward slashes, backslashes and other problematic characters
-    with underscores, to avoid recognizing them as directories or breaking URLs
-    and filenames.
+    """Replace forward slashes and other problematic characters
+    with underscores and backslashes with hyphen, to avoid recognizing them as
+    directories or breaking URLs and filenames.
     """
     return (
-        eid.replace("/", "_").replace("\\", "_").replace("\n", "_").replace("\r", "_")
+        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
     )
 
 
