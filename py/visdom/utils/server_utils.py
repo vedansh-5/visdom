@@ -15,11 +15,9 @@ in the previous server.py class.
 """
 
 
-import tornado
 import copy
 import html
 import hashlib
-import copy
 import json
 import logging
 import os
@@ -127,9 +125,6 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
             if isinstance(state[env_id], LazyEnvData):
                 if state[env_id]._raw_dict is None:
                     continue
-                data = json.dumps(state[env_id]._raw_dict)
-            else:
-                data = json.dumps(state[env_id])
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
             try:
                 with open(env_path_file, "w") as fn:
