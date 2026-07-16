@@ -21,6 +21,7 @@ import tornado.web  # noqa E402: gotta install ioloop first
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 from visdom.utils.server_utils import LazyEnvData
 from visdom.data_model.json_store import JSONStore
+from visdom.server.workspace_manager import WorkspaceManager
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -82,6 +83,7 @@ class Application(tornado.web.Application):
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.storage = JSONStore(env_path)
+        self.workspace_manager = WorkspaceManager()
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()

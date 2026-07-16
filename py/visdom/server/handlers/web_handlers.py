@@ -546,6 +546,8 @@ class ForkEnvHandler(BaseHandler):
 
 
 class EnvHandler(BaseHandler):
+    EID_IN_PATH = True
+
     def initialize(self, app):
         super().initialize(app)
         self.wrap_socket = app.wrap_socket

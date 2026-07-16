@@ -674,6 +674,8 @@ class Visdom(object):
         log_to_filename=None,
         username=None,
         password=None,
+        api_key=None,
+        workspace=None,
         proxies=None,
         offline=False,
         use_polling=False,
@@ -750,6 +752,11 @@ class Visdom(object):
             assert password, "no password given for authentication"
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+        self.api_key = api_key
+        self.workspace = workspace
+        if self.api_key:
+            assert self.workspace, "workspace is required when api_key is given"
+
         self.win_data = {}
         if self.offline:
             self.use_socket = False
@@ -824,6 +831,10 @@ class Visdom(object):
                 sess.verify = self.ssl_verify
             elif not self.ssl_verify:
                 sess.verify = False
+            if self.api_key:
+                sess.headers.update(
+                    {"X-API-KEY": self.api_key, "X-Visdom-Workspace": self.workspace}
+                )
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
