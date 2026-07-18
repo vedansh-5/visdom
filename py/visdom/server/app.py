@@ -22,6 +22,7 @@ from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_p
 from visdom.utils.server_utils import LazyEnvData
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
+from visdom.server.workspace_env_manager import WorkspaceEnvManager, WorkspaceSpace
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -89,6 +90,13 @@ class Application(tornado.web.Application):
         self.user_settings = self.load_user_settings()
         self.subs = {}
         self.sources = {}
+        self.workspace_env_manager = WorkspaceEnvManager(
+            base_env_path=env_path,
+            default_space=WorkspaceSpace(
+                self.storage, self.state, self.subs, self.sources
+            ),
+            eager=self.eager_data_loading,
+        )
         self.port = port
         self.base_url = base_url
         self.readonly = readonly

@@ -23,7 +23,12 @@ from enum import Enum
 
 import tornado.ioloop
 import tornado.escape
-from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
+from visdom.server.handlers.base_handlers import (
+    BaseWebSocketHandler,
+    BaseHandler,
+    WorkspaceScopedMixin,
+)
+from visdom.server.workspace_manager import WorkspaceAuthError
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
@@ -64,13 +69,30 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 #   Write access is limited to data and view organization (i.e. layout settings, env removal and env saving)
 
 
-class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
+class AnySocketHandlerOrWrapper(WorkspaceScopedMixin, BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
         super().__init__(*args, **kwargs)
 
+    def initialize(self, app=None):
+        """Common socket initialization, plus this deployment's workspace managers."""
+        super().initialize(app)
+        if app is not None:
+            self.workspace_manager = getattr(app, "workspace_manager", None)
+            self.workspace_env_manager = getattr(app, "workspace_env_manager", None)
+
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
+        # Scope this socket to its workspace before it registers, so its env list
+        # and every broadcast it sends/receives stay within that workspace.
+        try:
+            resolved = self.resolve_workspace()
+        except WorkspaceAuthError:
+            self.close()
+            return
+        if resolved is not None:
+            workspace_id, _role = resolved
+            self.bind_workspace(workspace_id)
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):
             self.eid = "main"

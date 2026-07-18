@@ -10,18 +10,15 @@
 Contain the basic web request handlers that all other handlers derive from
 """
 
-import json
 import logging
 import traceback
 import http.client
 import time
 
-import tornado.escape
 import tornado.web
 import tornado.websocket
 
 from visdom.server.workspace_manager import WorkspaceAuthError
-from visdom.utils.server_utils import escape_eid
 
 # POST endpoints that mutate environment state; viewers are denied these.
 WRITE_ENDPOINTS = {
@@ -65,6 +62,44 @@ def _copy_app_attributes(handler, app, attrs, store_app=False):
         setattr(handler, attr, getattr(app, attr))
 
 
+class WorkspaceScopedMixin:
+    """Shared workspace resolution + state-binding for HTTP and socket handlers.
+
+    ``resolve_workspace`` maps the request's X-Visdom-Workspace header plus its
+    credential (the X-API-KEY header on the write path, or the ``session_token``
+    cookie on the browser read path) to (workspace_id, role) via the gateway.
+    ``bind_workspace`` re-points state/storage/subs/sources at that workspace's
+    isolated space so subsequent handler logic operates on that workspace's slice.
+    Returns None (no binding) for ordinary keyless/local traffic.
+    """
+
+    workspace_manager = None
+    workspace_env_manager = None
+
+    def resolve_workspace(self):
+        if self.workspace_manager is None:
+            return None
+        workspace_slug = self.request.headers.get("X-Visdom-Workspace")
+        if not workspace_slug:
+            return None
+        api_key = self.request.headers.get("X-API-KEY")
+        session_token = self.get_cookie("session_token")
+        if api_key:
+            return self.workspace_manager.resolve(api_key, workspace_slug)
+        if session_token:
+            return self.workspace_manager.resolve_session(session_token, workspace_slug)
+        return None
+
+    def bind_workspace(self, workspace_id):
+        if self.workspace_env_manager is None:
+            return
+        space = self.workspace_env_manager.space(workspace_id)
+        self.state = space.state
+        self.storage = space.storage
+        self.subs = space.subs
+        self.sources = space.sources
+
+
 class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
     """
     Implements any required overriden functionality from the basic tornado
@@ -88,7 +123,7 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
             return None
 
 
-class BaseHandler(tornado.web.RequestHandler):
+class BaseHandler(WorkspaceScopedMixin, tornado.web.RequestHandler):
     """
     Implements any required overriden functionality from the basic tornado
     request handlers, and contains any convenient shared logic helpers.
@@ -107,6 +142,7 @@ class BaseHandler(tornado.web.RequestHandler):
         _copy_app_attributes(self, app, _WEB_APP_ATTRIBUTES)
         if app is not None:
             self.workspace_manager = getattr(app, "workspace_manager", None)
+            self.workspace_env_manager = getattr(app, "workspace_env_manager", None)
 
     def is_authorized(self):
         """Update access time and validate authentication for protected methods."""
@@ -119,69 +155,38 @@ class BaseHandler(tornado.web.RequestHandler):
     def __init__(self, *request, **kwargs):
         self.include_host = False
         self.workspace_manager = None
+        self.workspace_env_manager = None
         super(BaseHandler, self).__init__(*request, **kwargs)
 
     def prepare(self):
-        """Scope a workspace-authenticated request to its workspace namespace.
+        """Bind a workspace-authenticated request to its workspace's state slice.
 
-        Only engages when the request carries both the X-API-KEY and
-        X-Visdom-Workspace headers, so ordinary visdom traffic (browser reads,
-        health checks, keyless clients) is unaffected. Resolves the key and
-        workspace through the gateway, denies writes for the viewer role, and
-        rewrites the body's eid to ``ws_<workspace_id>/<eid>`` so all state for
-        this request lands in that workspace's environment namespace.
+        Engages only when the request carries the X-Visdom-Workspace header (set
+        by the python client on the write path, or injected by nginx from the
+        ``/vis/w/<slug>/`` path on the browser read path), so ordinary visdom
+        traffic (health checks, keyless clients) is unaffected. Authenticates via
+        either the X-API-KEY header (write path) or the ``session_token`` cookie
+        (browser read path), denies writes for the viewer role, and re-points this
+        handler's state/storage/subs/sources at that workspace's isolated space so
+        all subsequent handler logic operates on that workspace's environments.
         """
-        if self.workspace_manager is None:
-            return
-        api_key = self.request.headers.get("X-API-KEY")
-        workspace_slug = self.request.headers.get("X-Visdom-Workspace")
-        if not api_key or not workspace_slug:
-            return
-
         try:
-            workspace_id, role = self.workspace_manager.resolve(api_key, workspace_slug)
+            resolved = self.resolve_workspace()
         except WorkspaceAuthError as exc:
             self.set_status(exc.status_code)
             self.finish({"error": exc.message})
             return
+        if resolved is None:
+            return
 
+        workspace_id, role = resolved
         endpoint = self.request.path.rsplit("/", 1)[-1]
         if role == "viewer" and endpoint in WRITE_ENDPOINTS:
             self.set_status(403)
-            self.finish(
-                {"error": "This API key's role is read-only in this workspace."}
-            )
+            self.finish({"error": "Your role is read-only in this workspace."})
             return
 
-        prefix = f"ws_{workspace_id}"
-        self._scope_body_eid(prefix)
-        if getattr(self, "EID_IN_PATH", False) and self.path_args:
-            self._scope_path_eid(prefix)
-
-    def _scope_body_eid(self, prefix):
-        if not self.request.body:
-            return
-        try:
-            body = tornado.escape.json_decode(
-                tornado.escape.to_basestring(self.request.body)
-            )
-        except ValueError:
-            return
-        if not isinstance(body, dict):
-            return
-        eid = body.get("eid")
-        if eid is None or str(eid).startswith(prefix):
-            return
-        body["eid"] = f"{prefix}/{eid}"
-        self.request.body = tornado.escape.utf8(json.dumps(body))
-
-    def _scope_path_eid(self, prefix):
-        args = list(self.path_args)
-        eid = args[0]
-        if not eid or str(eid).startswith(prefix):
-            return
-        args[0] = escape_eid(f"{prefix}/{eid}")
-        self.path_args = args
+        self.bind_workspace(workspace_id)
 
     def get_current_user(self):
         """
