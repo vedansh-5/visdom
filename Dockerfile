@@ -3,7 +3,7 @@
 FROM node:22-slim AS frontend
 WORKDIR /src
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .
 RUN npm run build
 
@@ -21,3 +21,4 @@ ENV VISDOM_PORT=8097 \
 
 EXPOSE 8097
 CMD ["sh", "-c", "python -m visdom.server -port \"${VISDOM_PORT}\" -base_url \"${VISDOM_BASE_URL}\" -env_path \"${VISDOM_ENV_PATH}\""]
+u
