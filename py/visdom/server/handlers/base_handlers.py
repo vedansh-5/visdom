@@ -76,6 +76,8 @@ class WorkspaceScopedMixin:
 
     workspace_manager = None
     workspace_env_manager = None
+    workspace_slug = None
+    workspace_role = None
 
     def resolve_workspace(self):
         if self.workspace_manager is None:
@@ -181,6 +183,8 @@ class BaseHandler(WorkspaceScopedMixin, tornado.web.RequestHandler):
             return
 
         workspace_id, role = resolved
+        self.workspace_slug = self.request.headers.get("X-Visdom-Workspace")
+        self.workspace_role = role
         endpoint = self.request.path.rsplit("/", 1)[-1]
         if role == "viewer" and endpoint in WRITE_ENDPOINTS:
             self.set_status(403)

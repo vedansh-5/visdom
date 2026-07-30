@@ -68,6 +68,14 @@ logger = logging.getLogger(__name__)
 # all handlers. Can instead provide accessor functions on the state?
 
 
+def build_cloud_context(slug, role):
+    """Serialise the console context for the index template, or None when not in a workspace."""
+    if not slug:
+        return None
+    payload = json.dumps({"slug": slug, "role": role})
+    return payload.replace("</", "<\\/")
+
+
 class PostHandler(BaseHandler):
     @check_auth
     def post(self):
@@ -746,6 +754,9 @@ class IndexHandler(BaseHandler):
             self.render(
                 "index.html",
                 wrap_socket=self.wrap_socket,
+                cloud_context=build_cloud_context(
+                    self.workspace_slug, self.workspace_role
+                ),
             )
         elif self.login_enabled:
             items = gather_envs(self.state, self.storage)
