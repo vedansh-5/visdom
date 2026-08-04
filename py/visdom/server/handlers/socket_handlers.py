@@ -44,6 +44,10 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
+# RFC 6455 close codes, so a denied client can tell refusal from a dropped link.
+WS_POLICY_VIOLATION = 1008
+WS_TRY_AGAIN_LATER = 1013
+
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -87,8 +91,9 @@ class AnySocketHandlerOrWrapper(WorkspaceScopedMixin, BaseWebSocketHandler):
         # and every broadcast it sends/receives stay within that workspace.
         try:
             resolved = self.resolve_workspace()
-        except WorkspaceAuthError:
-            self.close()
+        except WorkspaceAuthError as exc:
+            code = WS_TRY_AGAIN_LATER if exc.status_code >= 500 else WS_POLICY_VIOLATION
+            self.close(code, exc.message)
             return
         if resolved is not None:
             workspace_id, _role = resolved
@@ -421,7 +426,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         else:
             self.app.socket_wrap_monitor.stop()
 
-    def close(self):
+    def close(self, code=None, reason=None):
         self.on_close()
 
     def write_message(self, msg):
