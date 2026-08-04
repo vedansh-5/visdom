@@ -1006,12 +1006,19 @@ class Visdom(object):
         def on_close(ws, close_status_code=None, close_msg=None):
             self.socket_alive = False
             if not self.socket_connection_achieved:
-                logger.warning(
-                    "WebSocket closed before connection achieved "
-                    "(close_status_code=%s). If login is enabled, "
-                    "pass username/password to Visdom().",
-                    close_status_code,
-                )
+                if close_msg:
+                    logger.warning(
+                        "Server refused the WebSocket: %s (close_status_code=%s)",
+                        close_msg,
+                        close_status_code,
+                    )
+                else:
+                    logger.warning(
+                        "WebSocket closed before connection achieved "
+                        "(close_status_code=%s). If login is enabled, "
+                        "pass username/password to Visdom().",
+                        close_status_code,
+                    )
                 self.use_socket = False
 
         host_scheme = urlparse(self.server).scheme
