@@ -1020,15 +1020,19 @@ class Visdom(object):
                     sock_addr = "{}://{}:{}{}/vis_socket".format(
                         ws_scheme, self.server_base_name, self.port, self.base_url
                     )
+                    ws_header = {
+                        "Cookie": "user_password="
+                        + self.session.cookies.get("user_password", "")
+                    }
+                    if self.api_key:
+                        ws_header["X-API-KEY"] = self.api_key
+                        ws_header["X-Visdom-Workspace"] = self.workspace
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,
                         on_error=on_error,
                         on_close=on_close,
-                        header={
-                            "Cookie": "user_password="
-                            + self.session.cookies.get("user_password", "")
-                        },
+                        header=ws_header,
                     )
                     run_forever_kwargs = {
                         "http_proxy_host": self.http_proxy_host,
