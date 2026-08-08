@@ -48,13 +48,26 @@ def build_state(storage, eager=False, ensure_main=True):
 
 
 class WorkspaceSpace:
-    """A single workspace's isolated env state, disk storage, and socket peers."""
+    """A single workspace's isolated env state, disk storage, socket peers, and
+    saved view layouts."""
 
-    def __init__(self, storage, state, subs=None, sources=None):
+    def __init__(self, storage, state, subs=None, sources=None, layouts=""):
         self.storage = storage
         self.state = state
         self.subs = subs if subs is not None else {}
         self.sources = sources if sources is not None else {}
+        self.layouts = layouts
+
+    def save_layouts(self, layouts):
+        """Replace this workspace's saved layouts and persist them.
+
+        Layouts are a string rather than a mutable container, so handlers cannot
+        write through a re-pointed attribute the way they do for ``state`` and
+        ``subs``; they go through the space instead.
+        """
+        self.layouts = layouts
+        if self.storage is not None:
+            self.storage.save_layouts(layouts)
 
 
 class WorkspaceEnvManager:
@@ -82,4 +95,8 @@ class WorkspaceEnvManager:
         ws_path = os.path.join(self.base_env_path, "workspaces", str(workspace_id))
         ensure_dir_exists(ws_path)
         storage = JSONStore(ws_path)
-        return WorkspaceSpace(storage, build_state(storage, eager=self.eager))
+        return WorkspaceSpace(
+            storage,
+            build_state(storage, eager=self.eager),
+            layouts=storage.load_layouts(),
+        )
