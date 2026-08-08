@@ -236,6 +236,73 @@ class TestLayoutWiring(unittest.TestCase):
         self.assertEqual(app.load_layouts(), "")
 
 
+class TestWorkspaceLayoutIsolation(unittest.TestCase):
+    """Each workspace keeps its own saved layouts, not a shared global blob."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env_path = self._tmp.name
+        self.app = Application(port=8097, env_path=self.env_path)
+        self.manager = self.app.workspace_env_manager
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_workspaces_start_with_no_layouts(self):
+        self.assertEqual(self.manager.space("ws-a").layouts, "")
+
+    def test_saving_in_one_workspace_does_not_leak_to_another(self):
+        self.manager.space("ws-a").save_layouts('[["a", {}]]')
+        self.assertEqual(self.manager.space("ws-a").layouts, '[["a", {}]]')
+        self.assertEqual(self.manager.space("ws-b").layouts, "")
+
+    def test_saving_in_a_workspace_does_not_touch_the_default_space(self):
+        self.app.layouts = '[["default", {}]]'
+        self.manager.space("ws-a").save_layouts('[["a", {}]]')
+        self.assertEqual(self.app.layouts, '[["default", {}]]')
+
+    def test_layouts_persist_under_the_workspace_directory(self):
+        self.manager.space("ws-a").save_layouts('[["a", {}]]')
+        expected = os.path.join(
+            self.env_path, "workspaces", "ws-a", "view", "layouts.json"
+        )
+        self.assertTrue(os.path.isfile(expected))
+        with open(expected) as fn:
+            self.assertEqual(fn.read(), '[["a", {}]]')
+
+    def test_layouts_reload_from_disk_on_a_new_application(self):
+        self.manager.space("ws-a").save_layouts('[["a", {}]]')
+        app2 = Application(port=8097, env_path=self.env_path)
+        self.assertEqual(
+            app2.workspace_env_manager.space("ws-a").layouts, '[["a", {}]]'
+        )
+        self.assertEqual(app2.workspace_env_manager.space("ws-b").layouts, "")
+
+    def test_bound_handler_reads_its_own_workspace_layouts(self):
+        self.manager.space("ws-a").save_layouts('[["a", {}]]')
+
+        handler = AnySocketHandlerOrWrapper.__new__(AnySocketHandlerOrWrapper)
+        handler.workspace_env_manager = self.manager
+
+        self.assertEqual(handler.space.layouts, "")
+        handler.bind_workspace("ws-a")
+        self.assertEqual(handler.space.layouts, '[["a", {}]]')
+
+    def test_unbound_handler_falls_back_to_the_default_space(self):
+        self.app.layouts = '[["default", {}]]'
+
+        handler = AnySocketHandlerOrWrapper.__new__(AnySocketHandlerOrWrapper)
+        handler.workspace_env_manager = self.manager
+
+        self.assertEqual(handler.space.layouts, '[["default", {}]]')
+
+    def test_in_memory_space_keeps_layouts_without_storage(self):
+        app = Application(port=8097, env_path=None)
+        space = app.workspace_env_manager.space("ws-a")
+        space.save_layouts('[["a", {}]]')
+        self.assertEqual(space.layouts, '[["a", {}]]')
+
+
 class TestUndoWiring(unittest.TestCase):
     """Undo helpers persist through the DataStore, not raw env_path I/O."""
 

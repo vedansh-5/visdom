@@ -187,8 +187,7 @@ class AnySocketHandlerOrWrapper(WorkspaceScopedMixin, BaseWebSocketHandler):
 
         elif cmd == "save_layouts":
             if "data" in msg:
-                self.app.layouts = msg.get("data")
-                self.app.save_layouts()
+                self.space.save_layouts(msg.get("data"))
                 self.broadcast_layouts()
 
         elif cmd == "forward_to_vis":
@@ -521,7 +520,7 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         for sub in target_subs:
             sub.write_message(
                 json.dumps(
-                    {"command": "layout_update", "data": self.app.layouts},
+                    {"command": "layout_update", "data": self.space.layouts},
                     cls=NanSafeEncoder,
                 )
             )
