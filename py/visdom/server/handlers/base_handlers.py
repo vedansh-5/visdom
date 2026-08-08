@@ -72,12 +72,26 @@ class WorkspaceScopedMixin:
     ``bind_workspace`` re-points state/storage/subs/sources at that workspace's
     isolated space so subsequent handler logic operates on that workspace's slice.
     Returns None (no binding) for ordinary keyless/local traffic.
+
+    ``space`` exposes the bound space itself, for the parts of a workspace's slice
+    that are not mutable containers and so cannot be written through a re-pointed
+    attribute — saved layouts being the one such case.
     """
 
     workspace_manager = None
     workspace_env_manager = None
     workspace_slug = None
     workspace_role = None
+    _space = None
+
+    @property
+    def space(self):
+        """The bound workspace's space, or the default space when unbound."""
+        if self._space is not None:
+            return self._space
+        if self.workspace_env_manager is not None:
+            return self.workspace_env_manager.space(None)
+        return None
 
     def resolve_workspace(self):
         if self.workspace_manager is None:
@@ -97,6 +111,7 @@ class WorkspaceScopedMixin:
         if self.workspace_env_manager is None:
             return
         space = self.workspace_env_manager.space(workspace_id)
+        self._space = space
         self.state = space.state
         self.storage = space.storage
         self.subs = space.subs

@@ -97,7 +97,6 @@ class Application(tornado.web.Application):
         self.storage = JSONStore(env_path)
         self.workspace_manager = WorkspaceManager()
         self.state = self.load_state()
-        self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
         self.save_interval = save_interval
         self.save_threshold = save_threshold
@@ -108,7 +107,11 @@ class Application(tornado.web.Application):
         self.workspace_env_manager = WorkspaceEnvManager(
             base_env_path=env_path,
             default_space=WorkspaceSpace(
-                self.storage, self.state, self.subs, self.sources
+                self.storage,
+                self.state,
+                self.subs,
+                self.sources,
+                layouts=self.load_layouts(),
             ),
             eager=self.eager_data_loading,
         )
@@ -163,6 +166,19 @@ class Application(tornado.web.Application):
             # is currently connected to the server
             self.last_access = time.time()
         return self.last_access
+
+    @property
+    def layouts(self):
+        """Saved view layouts for the default (non-workspace) space.
+
+        Each workspace keeps its own layouts on its ``WorkspaceSpace``; this
+        remains the single-tenant view of the same value.
+        """
+        return self.workspace_env_manager.space(None).layouts
+
+    @layouts.setter
+    def layouts(self, value):
+        self.workspace_env_manager.space(None).layouts = value
 
     def mark_dirty(self, eid):
         """Record that ``eid`` has changed in memory and is not yet on disk.
