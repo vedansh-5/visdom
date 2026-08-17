@@ -116,6 +116,7 @@ class WorkspaceScopedMixin:
         self.storage = space.storage
         self.subs = space.subs
         self.sources = space.sources
+        self.mark_dirty = space.mark_dirty
 
 
 class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
