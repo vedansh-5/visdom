@@ -162,6 +162,10 @@ class BaseHandler(WorkspaceScopedMixin, tornado.web.RequestHandler):
             self.workspace_manager = getattr(app, "workspace_manager", None)
             self.workspace_env_manager = getattr(app, "workspace_env_manager", None)
 
+    def render(self, template_name, **kwargs):
+        kwargs.setdefault("cloud_context", None)
+        return super().render(template_name, **kwargs)
+
     def is_authorized(self):
         """Update access time and validate authentication for protected methods."""
         self.last_access = time.time()
