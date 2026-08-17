@@ -15,8 +15,10 @@ import logging
 import os
 import platform
 import time
+from collections import Counter
 
 import tornado.web  # noqa E402: gotta install ioloop first
+from tornado.ioloop import PeriodicCallback
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 from visdom.utils.server_utils import LazyEnvData
@@ -29,6 +31,7 @@ from visdom.server.handlers.socket_handlers import (
     VisSocketHandler,
     VisSocketWrap,
 )
+from visdom.server.handlers.experiments_handler import ExperimentHparamsHandler
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
     CompareHandler,
@@ -38,6 +41,10 @@ from visdom.server.handlers.web_handlers import (
     EnvStateHandler,
     ErrorHandler,
     ExistsHandler,
+    ExperimentCompareHandler,
+    ExperimentLogHandler,
+    ExperimentSearchHandler,
+    ExperimentSuggestHandler,
     ForkEnvHandler,
     HealthHandler,
     IndexHandler,
@@ -55,6 +62,8 @@ from visdom.server.defaults import (
     DEFAULT_MAX_OLD_CONTENT,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
+    DEFAULT_SAVE_INTERVAL,
+    DEFAULT_SAVE_THRESHOLD,
 )
 
 
@@ -77,6 +86,8 @@ class Application(tornado.web.Application):
         user_credential=None,
         use_frontend_client_polling=False,
         eager_data_loading=False,
+        save_interval=DEFAULT_SAVE_INTERVAL,
+        save_threshold=DEFAULT_SAVE_THRESHOLD,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
@@ -87,6 +98,9 @@ class Application(tornado.web.Application):
         self.workspace_manager = WorkspaceManager()
         self.state = self.load_state()
         self.user_settings = self.load_user_settings()
+        self.save_interval = save_interval
+        self.save_threshold = save_threshold
+        self.autosave = None
         self.subs = {}
         self.sources = {}
         self.workspace_env_manager = WorkspaceEnvManager(
@@ -97,8 +111,10 @@ class Application(tornado.web.Application):
                 self.subs,
                 self.sources,
                 layouts=self.load_layouts(),
+                save_threshold=save_threshold,
             ),
             eager=self.eager_data_loading,
+            save_threshold=save_threshold,
         )
         self.port = port
         self.base_url = base_url
@@ -115,6 +131,7 @@ class Application(tornado.web.Application):
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         tornado_settings["debug"] = True
+        experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
             (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
@@ -133,6 +150,11 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
+            (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
+            (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
+            (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
+            (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
+            (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
@@ -158,6 +180,49 @@ class Application(tornado.web.Application):
     @layouts.setter
     def layouts(self, value):
         self.workspace_env_manager.space(None).layouts = value
+
+    @property
+    def dirty_envs(self):
+        """Environments changed but not yet saved in the default space, which is
+        the whole server when no workspaces are in play."""
+        return self.workspace_env_manager.space(None).dirty_envs
+
+    def mark_dirty(self, eid):
+        """Record that ``eid`` has changed in the default space.
+
+        Handlers bound to a workspace are given that workspace's own
+        ``mark_dirty`` instead, re-pointed by ``bind_workspace`` alongside
+        ``state`` and ``storage``. Marking here would otherwise credit the change
+        to the default space and leave the workspace that actually changed
+        unsaved.
+        """
+        self.workspace_env_manager.space(None).mark_dirty(eid)
+
+    def flush_envs(self, eids):
+        """Persist the named environments of the default space."""
+        return self.workspace_env_manager.space(None).flush(eids)
+
+    def flush_dirty(self):
+        """Persist every environment changed since the last save, across every
+        workspace. This is what the timer calls, so a workspace nobody is
+        currently looking at is still saved."""
+        written = []
+        for space in self.workspace_env_manager.spaces():
+            written.extend(space.flush_dirty())
+        return written
+
+    def start_autosave(self):
+        """Begin saving changed environments every ``save_interval`` seconds.
+
+        A no-op when autosaving is disabled or already running. Ticks with
+        nothing dirty cost no IO.
+        """
+        if self.autosave is None and self.save_interval > 0:
+            self.autosave = PeriodicCallback(
+                self.flush_dirty, self.save_interval * 1000
+            )
+            self.autosave.start()
+        return self.autosave
 
     def save_layouts(self):
         if self.env_path is None:
@@ -193,6 +258,8 @@ class Application(tornado.web.Application):
         for eid in self.storage.list_envs():
             if self.eager_data_loading:
                 env_data = self.storage.load_env(eid)
+                if not isinstance(env_data, dict):
+                    env_data = {}
 
                 if "jsons" not in env_data or "reload" not in env_data:
                     logging.warning(
@@ -200,10 +267,13 @@ class Application(tornado.web.Application):
                         eid,
                     )
 
-                state[eid] = {
-                    "jsons": env_data.get("jsons", {}),
-                    "reload": env_data.get("reload", {}),
-                }
+                # Copy the whole env rather than picking out jsons/reload, so
+                # keys the server does not read itself (such as the experiment
+                # metadata blob) survive the load and are still there when the
+                # env is saved back. LazyEnvData keeps them for the lazy path.
+                state[eid] = dict(env_data)
+                state[eid].setdefault("jsons", {})
+                state[eid].setdefault("reload", {})
             else:
                 state[eid] = LazyEnvData(self.storage, eid)
 

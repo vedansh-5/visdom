@@ -40,6 +40,7 @@ _COMMON_APP_ATTRIBUTES = (
     "env_path",
     "storage",
     "login_enabled",
+    "mark_dirty",
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
@@ -115,6 +116,10 @@ class WorkspaceScopedMixin:
         self.storage = space.storage
         self.subs = space.subs
         self.sources = space.sources
+        # Re-pointed with the rest: the app-level mark_dirty tracks the default
+        # space, so leaving it bound here would record this workspace's changes
+        # against the wrong one and leave the real env unsaved.
+        self.mark_dirty = space.mark_dirty
 
 
 class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
@@ -160,6 +165,10 @@ class BaseHandler(WorkspaceScopedMixin, tornado.web.RequestHandler):
         if app is not None:
             self.workspace_manager = getattr(app, "workspace_manager", None)
             self.workspace_env_manager = getattr(app, "workspace_env_manager", None)
+
+    def render(self, template_name, **kwargs):
+        kwargs.setdefault("cloud_context", None)
+        return super().render(template_name, **kwargs)
 
     def is_authorized(self):
         """Update access time and validate authentication for protected methods."""
@@ -231,7 +240,7 @@ class BaseHandler(WorkspaceScopedMixin, tornado.web.RequestHandler):
             # exc_info is a tuple consisting of:
             # 1. The class of the Exception
             # 2. The actual Exception that was thrown
-            # 3. The traceback opbject
+            # 3. The traceback object
             try:
                 params = {
                     "error": exc_info[1] if debug else None,

@@ -9,17 +9,15 @@ LICENSE file in the root directory of this source tree.
 -->
 
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <title>visdom</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link rel="icon" type="image/svg+xml" href={{ static_url("favicon.svg") }}>
 
-    <!-- Bootstrap & jQuery -->
-    <link rel="stylesheet" href={{ static_url("css/bootstrap.min.css") }}>
-    <script src={{ static_url("js/jquery.min.js") }}></script>
-    <script src={{ static_url("js/bootstrap.min.js") }}></script>
+    <link rel="stylesheet" href={{ static_url("css/base.css") }}>
 
     <link rel="stylesheet" href={{ static_url("css/react-resizable-styles.css") }}>
     <link rel="stylesheet" href={{ static_url("css/react-grid-layout-styles.css") }}>
@@ -50,9 +48,6 @@ LICENSE file in the root directory of this source tree.
 
     <!-- Custom styles for this template -->
     <script>
-    // TODO: this is not great. Should probably be an endpoint with a JSON
-    // response or the first thing the socket sends back.
-    var ENV_LIST = [];
     function getActiveEnvFromPath() {
       var path = window.location.pathname || '';
       if (path.includes('/env/')) {
@@ -74,10 +69,6 @@ LICENSE file in the root directory of this source tree.
     var ACTIVE_ENV = getActiveEnvFromPath();
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
-    // Plotly setup
-    window.PLOTLYENV = window.PLOTLYENV || {};
-    window.PLOTLYENV.BASE_URL = 'https://plot.ly';
-
     </script>
     {% if cloud_context %}
     <script>window.VISDOM_CLOUD = {% raw cloud_context %};</script>
@@ -88,8 +79,8 @@ LICENSE file in the root directory of this source tree.
     <link rel="stylesheet" href={{ static_url("../user/style.css") }}>
     <!-- Added Script for NetworkPane -->
     <link rel="stylesheet" href={{ static_url("css/network.css") }}>
-
-    <title>visdom</title>
+    <!-- Styles for HParamsPane -->
+    <link rel="stylesheet" href={{ static_url("css/hparams.css") }}>
     <!-- <link rel="icon" href="http://example.com/favicon.png"> -->
   </head>
 
