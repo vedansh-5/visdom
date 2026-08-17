@@ -20,6 +20,7 @@ local visdom behaves exactly as before.
 
 import os
 import threading
+from collections import Counter
 
 from visdom.data_model.json_store import JSONStore
 from visdom.utils.server_utils import LazyEnvData
@@ -51,12 +52,56 @@ class WorkspaceSpace:
     """A single workspace's isolated env state, disk storage, socket peers, and
     saved view layouts."""
 
-    def __init__(self, storage, state, subs=None, sources=None, layouts=""):
+    def __init__(
+        self, storage, state, subs=None, sources=None, layouts="", save_threshold=0
+    ):
         self.storage = storage
         self.state = state
         self.subs = subs if subs is not None else {}
         self.sources = sources if sources is not None else {}
         self.layouts = layouts
+        self.save_threshold = save_threshold
+        self.dirty_envs = Counter()
+
+    def mark_dirty(self, eid):
+        """Record that ``eid`` has changed in memory and is not yet on disk.
+
+        Tracked per workspace rather than per server: an ``eid`` like ``main``
+        exists in every workspace, so a single shared counter would confuse one
+        workspace's unsaved work with another's and save the wrong file.
+        """
+        self.dirty_envs[eid] += 1
+        if 0 < self.save_threshold <= self.dirty_envs[eid]:
+            self.flush([eid])
+
+    def flush(self, eids):
+        """Persist the named environments, skipping any already saved.
+
+        Only environments the backend reports as written lose their mark, so one
+        it declines is retried on the next pass rather than silently dropped. An
+        environment deleted since it was marked has nothing left to save and is
+        cleared too.
+        """
+        if self.storage is None:
+            # Nothing to write to, so drop the marks rather than accumulate them
+            # forever against a space that is memory-only by construction.
+            for eid in eids:
+                self.dirty_envs.pop(eid, None)
+            return []
+
+        pending = [eid for eid in eids if self.dirty_envs.get(eid)]
+        if not pending:
+            return []
+        written = self.storage.save_envs(self.state, pending)
+        saved = set(written)
+        for eid in pending:
+            if eid in saved or eid not in self.state:
+                del self.dirty_envs[eid]
+        return written
+
+    def flush_dirty(self):
+        """Persist every environment in this workspace changed since the last save."""
+        return self.flush(list(self.dirty_envs))
 
     def save_layouts(self, layouts):
         """Replace this workspace's saved layouts and persist them.
@@ -71,9 +116,10 @@ class WorkspaceSpace:
 
 
 class WorkspaceEnvManager:
-    def __init__(self, base_env_path, default_space, eager=False):
+    def __init__(self, base_env_path, default_space, eager=False, save_threshold=0):
         self.base_env_path = base_env_path
         self.eager = eager
+        self.save_threshold = save_threshold
         self._spaces = {None: default_space}
         self._lock = threading.Lock()
 
@@ -89,6 +135,15 @@ class WorkspaceEnvManager:
                 self._spaces[workspace_id] = space
             return space
 
+    def spaces(self):
+        """Every space built so far, the default one included.
+
+        Returned as a list rather than a live view so the autosave timer can walk
+        it without holding the lock while it writes to disk.
+        """
+        with self._lock:
+            return list(self._spaces.values())
+
     def _create_space(self, workspace_id):
         if self.base_env_path is None:
             return WorkspaceSpace(None, build_state(None))
@@ -99,4 +154,5 @@ class WorkspaceEnvManager:
             storage,
             build_state(storage, eager=self.eager),
             layouts=storage.load_layouts(),
+            save_threshold=self.save_threshold,
         )

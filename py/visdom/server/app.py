@@ -15,7 +15,6 @@ import logging
 import os
 import platform
 import time
-from collections import Counter
 
 import tornado.web  # noqa E402: gotta install ioloop first
 from tornado.ioloop import PeriodicCallback
@@ -100,7 +99,6 @@ class Application(tornado.web.Application):
         self.user_settings = self.load_user_settings()
         self.save_interval = save_interval
         self.save_threshold = save_threshold
-        self.dirty_envs = Counter()
         self.autosave = None
         self.subs = {}
         self.sources = {}
@@ -112,8 +110,10 @@ class Application(tornado.web.Application):
                 self.subs,
                 self.sources,
                 layouts=self.load_layouts(),
+                save_threshold=save_threshold,
             ),
             eager=self.eager_data_loading,
+            save_threshold=save_threshold,
         )
         self.port = port
         self.base_url = base_url
@@ -180,42 +180,32 @@ class Application(tornado.web.Application):
     def layouts(self, value):
         self.workspace_env_manager.space(None).layouts = value
 
-    def mark_dirty(self, eid):
-        """Record that ``eid`` has changed in memory and is not yet on disk.
+    @property
+    def dirty_envs(self):
+        """Environments changed but not yet saved in the default space."""
+        return self.workspace_env_manager.space(None).dirty_envs
 
-        Environments are saved on a timer rather than on every write, so a busy
-        one would otherwise sit unsaved for a whole interval; once it has taken
-        ``save_threshold`` updates it is written out immediately.
+    def mark_dirty(self, eid):
+        """Record that ``eid`` has changed in the default space.
+
+        Handlers bound to a workspace are given that workspace's own
+        ``mark_dirty`` by ``bind_workspace``, alongside ``state`` and
+        ``storage``. Marking here would credit the change to the default space
+        and leave the workspace that actually changed unsaved.
         """
-        self.dirty_envs[eid] += 1
-        if 0 < self.save_threshold <= self.dirty_envs[eid]:
-            self.flush_envs([eid])
+        self.workspace_env_manager.space(None).mark_dirty(eid)
 
     def flush_envs(self, eids):
-        """Persist the named environments, skipping any already saved.
-
-        Runs on the IO loop rather than in an executor: saving serializes
-        ``state``, and a background thread would be doing that while request
-        handlers mutate the very dictionaries it is walking.
-
-        Only environments the backend reports as written lose their mark, so one
-        it declines is retried on the next pass rather than silently dropped. An
-        environment deleted since it was marked has nothing left to save and is
-        cleared too.
-        """
-        pending = [eid for eid in eids if self.dirty_envs.get(eid)]
-        if not pending:
-            return []
-        written = self.storage.save_envs(self.state, pending)
-        saved = set(written)
-        for eid in pending:
-            if eid in saved or eid not in self.state:
-                del self.dirty_envs[eid]
-        return written
+        """Persist the named environments of the default space."""
+        return self.workspace_env_manager.space(None).flush(eids)
 
     def flush_dirty(self):
-        """Persist every environment changed since the last save."""
-        return self.flush_envs(list(self.dirty_envs))
+        """Persist every environment changed since the last save, in every
+        workspace, so one nobody is currently looking at is still written."""
+        written = []
+        for space in self.workspace_env_manager.spaces():
+            written.extend(space.flush_dirty())
+        return written
 
     def start_autosave(self):
         """Begin saving changed environments every ``save_interval`` seconds.
