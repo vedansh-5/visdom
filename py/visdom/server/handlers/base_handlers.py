@@ -107,10 +107,14 @@ class WorkspaceScopedMixin:
             return self.workspace_manager.resolve_session(session_token, workspace_slug)
         return None
 
-    def bind_workspace(self, workspace_id):
+    def bind_workspace(self, workspace_id, slug=None):
         if self.workspace_env_manager is None:
             return
-        space = self.workspace_env_manager.space(workspace_id)
+        if slug is None:
+            request = getattr(self, "request", None)
+            if request is not None:
+                slug = request.headers.get("X-Visdom-Workspace")
+        space = self.workspace_env_manager.space(workspace_id, slug=slug)
         self._space = space
         self.state = space.state
         self.storage = space.storage
