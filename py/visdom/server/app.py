@@ -24,6 +24,7 @@ from visdom.utils.server_utils import LazyEnvData
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
 from visdom.server.workspace_env_manager import WorkspaceEnvManager, WorkspaceSpace
+from visdom.server.ownership import OwnershipMonitor, local_address
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -65,7 +66,6 @@ from visdom.server.defaults import (
     DEFAULT_SAVE_THRESHOLD,
 )
 
-
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -100,6 +100,7 @@ class Application(tornado.web.Application):
         self.save_interval = save_interval
         self.save_threshold = save_threshold
         self.autosave = None
+        self.ownership_monitor = None
         self.subs = {}
         self.sources = {}
         self.workspace_env_manager = WorkspaceEnvManager(
@@ -219,6 +220,32 @@ class Application(tornado.web.Application):
             )
             self.autosave.start()
         return self.autosave
+
+    def start_ownership_monitor(self):
+        """Begin checking whether this instance still owns the workspaces it holds
+        sockets for. A no-op unless VISDOM_PROXY_URL names the proxy to ask."""
+        proxy_url = os.environ.get("VISDOM_PROXY_URL")
+        if not proxy_url or self.ownership_monitor is not None:
+            return self.ownership_monitor
+        try:
+            interval = int(os.environ.get("VISDOM_OWNERSHIP_INTERVAL", "30"))
+        except ValueError:
+            interval = 30
+        self.ownership_monitor = OwnershipMonitor(
+            self,
+            proxy_url,
+            "%s/_shard" % self.base_url,
+            interval,
+            local_address(self.port),
+        )
+        self.ownership_monitor.start()
+        logging.info(
+            "ownership monitor on, asking %s every %ds as %s",
+            proxy_url,
+            interval,
+            self.ownership_monitor.self_address,
+        )
+        return self.ownership_monitor
 
     def save_layouts(self):
         if self.env_path is None:

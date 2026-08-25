@@ -138,6 +138,7 @@ def start_server(
     signal.signal(signal.SIGTERM, _exit_cleanly)
 
     app.start_autosave()
+    app.start_ownership_monitor()
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]

@@ -57,6 +57,7 @@ class WorkspaceSpace:
     ):
         self.storage = storage
         self.state = state
+        self.slug = None
         self.subs = subs if subs is not None else {}
         self.sources = sources if sources is not None else {}
         self.layouts = layouts
@@ -123,7 +124,7 @@ class WorkspaceEnvManager:
         self._spaces = {None: default_space}
         self._lock = threading.Lock()
 
-    def space(self, workspace_id):
+    def space(self, workspace_id, slug=None):
         """Return the WorkspaceSpace for a workspace id, creating it on first use.
         ``None`` returns the default (global) space."""
         if workspace_id is None:
@@ -133,6 +134,8 @@ class WorkspaceEnvManager:
             if space is None:
                 space = self._create_space(workspace_id)
                 self._spaces[workspace_id] = space
+            if slug and space.slug != slug:
+                space.slug = slug
             return space
 
     def spaces(self):
@@ -143,6 +146,16 @@ class WorkspaceEnvManager:
         """
         with self._lock:
             return list(self._spaces.values())
+
+    def workspace_spaces(self):
+        """Every space that belongs to a workspace, as (id, space) pairs.
+
+        Excludes the default space, which no proxy ever routes to.
+        """
+        with self._lock:
+            return [
+                (wid, space) for wid, space in self._spaces.items() if wid is not None
+            ]
 
     def _create_space(self, workspace_id):
         if self.base_env_path is None:
