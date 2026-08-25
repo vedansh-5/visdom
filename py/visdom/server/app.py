@@ -24,7 +24,11 @@ from visdom.utils.server_utils import LazyEnvData
 from visdom.data_model.json_store import JSONStore
 from visdom.server.workspace_manager import WorkspaceManager
 from visdom.server.workspace_env_manager import WorkspaceEnvManager, WorkspaceSpace
-from visdom.server.ownership import OwnershipMonitor, local_address
+from visdom.server.ownership import (
+    OwnershipMonitor,
+    WS_TRY_AGAIN_LATER,
+    local_address,
+)
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -246,6 +250,24 @@ class Application(tornado.web.Application):
             self.ownership_monitor.self_address,
         )
         return self.ownership_monitor
+
+    def drain_sockets(self, reason="server shutting down, reconnect"):
+        """Close every live viewer socket with a retryable code."""
+        spaces = [self.workspace_env_manager.space(None)]
+        spaces += [
+            space for _wid, space in self.workspace_env_manager.workspace_spaces()
+        ]
+        closed = 0
+        for space in spaces:
+            for sub in list(space.subs.values()):
+                try:
+                    sub.close(WS_TRY_AGAIN_LATER, reason)
+                    closed += 1
+                except Exception as exc:
+                    logging.debug("could not close a socket while draining: %s", exc)
+        if closed:
+            logging.info("drained %d socket(s) before shutdown", closed)
+        return closed
 
     def save_layouts(self):
         if self.env_path is None:
