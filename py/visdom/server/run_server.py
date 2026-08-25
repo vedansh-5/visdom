@@ -63,14 +63,26 @@ def valid_port(value):
     return port
 
 
-def _exit_cleanly(signum, frame):
-    """Turn a termination signal into a normal interpreter shutdown.
+def _drain_then_exit(app, server):
+    """Stop accepting connections, close live sockets, then exit normally.
 
     Python's default disposition for SIGTERM ends the process outright, so the
     ``atexit`` save never runs and ``docker stop`` discards every unsaved
     environment. Raising SystemExit instead unwinds and lets that handler fire.
     """
-    sys.exit(0)
+
+    def handler(signum, frame):
+        try:
+            server.stop()
+        except Exception as exc:
+            logging.debug("could not stop the listener while draining: %s", exc)
+        try:
+            app.drain_sockets()
+        except Exception as exc:
+            logging.debug("could not drain sockets: %s", exc)
+        sys.exit(0)
+
+    return handler
 
 
 def start_server(
@@ -135,7 +147,7 @@ def start_server(
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
     atexit.register(app.storage.save_all, app.state)
-    signal.signal(signal.SIGTERM, _exit_cleanly)
+    signal.signal(signal.SIGTERM, _drain_then_exit(app, server))
 
     app.start_autosave()
     app.start_ownership_monitor()
