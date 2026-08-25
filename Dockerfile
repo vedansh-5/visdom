@@ -23,4 +23,4 @@ ENV VISDOM_PORT=8097 \
     VISDOM_GATEWAY_URL=http://gateway:8085
 
 EXPOSE 8097
-CMD ["sh", "-c", "python -m visdom.server -port \"${VISDOM_PORT}\" -base_url \"${VISDOM_BASE_URL}\" -env_path \"${VISDOM_ENV_PATH}\""]
+CMD ["sh", "-c", "exec python -m visdom.server -port \"${VISDOM_PORT}\" -base_url \"${VISDOM_BASE_URL}\" -env_path \"${VISDOM_ENV_PATH}\""]
