@@ -37,6 +37,7 @@ from visdom.server.handlers.socket_handlers import (
 )
 from visdom.server.handlers.experiments_handler import ExperimentHparamsHandler
 from visdom.server.handlers.web_handlers import (
+    ActivityHandler,
     CloseHandler,
     CompareHandler,
     DataHandler,
@@ -161,6 +162,7 @@ class Application(tornado.web.Application):
             (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
+            (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)

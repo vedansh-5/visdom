@@ -20,6 +20,7 @@ local visdom behaves exactly as before.
 
 import os
 import threading
+import time
 from collections import Counter
 
 from visdom.data_model.json_store import JSONStore
@@ -63,6 +64,7 @@ class WorkspaceSpace:
         self.layouts = layouts
         self.save_threshold = save_threshold
         self.dirty_envs = Counter()
+        self.last_write_at = None
 
     def mark_dirty(self, eid):
         """Record that ``eid`` has changed in memory and is not yet on disk.
@@ -72,8 +74,42 @@ class WorkspaceSpace:
         workspace's unsaved work with another's and save the wrong file.
         """
         self.dirty_envs[eid] += 1
+        self.last_write_at = time.time()
         if 0 < self.save_threshold <= self.dirty_envs[eid]:
             self.flush([eid])
+
+    def last_active_at(self):
+        """When this workspace was last written to, as a unix timestamp.
+
+        Prefers the in-memory mark, which is exact but resets when the instance
+        restarts, and falls back to the mtime of the workspace's directory so a
+        restart reports a stale time rather than none at all. ``None`` only when
+        the workspace has no storage and has not been written to this run.
+        """
+        if self.last_write_at is not None:
+            return self.last_write_at
+        env_path = getattr(self.storage, "env_path", None)
+        if not env_path:
+            return None
+        try:
+            return os.path.getmtime(env_path)
+        except OSError:
+            return None
+
+    def activity(self):
+        """Live socket counts for this workspace, plus when it was last written.
+
+        Readers and writers are counted separately because they mean different
+        things to an operator: a workspace with viewers but no sources is being
+        watched, one with sources and no viewers is being fed by a training run
+        nobody is looking at.
+        """
+        return {
+            "slug": self.slug,
+            "viewers": len(self.subs),
+            "writers": len(self.sources),
+            "last_active_at": self.last_active_at(),
+        }
 
     def flush(self, eids):
         """Persist the named environments, skipping any already saved.
