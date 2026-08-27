@@ -1238,3 +1238,32 @@ class ExperimentSuggestHandler(BaseHandler):
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
+
+
+class ActivityHandler(BaseHandler):
+    """Reports who is connected to each workspace this instance currently holds.
+
+    Only ever the instance's own share of them: the proxy hashes each workspace
+    onto exactly one instance, so a caller wanting the whole deployment asks every
+    instance and concatenates. Carries no environment data or plot contents, only
+    counts, but it does name every workspace on the instance, so the proxy keeps it
+    off the public surface and it is reached directly over the internal network.
+    """
+
+    def initialize(self, app=None):
+        """Take only the workspace manager, not the usual bundle of app attributes.
+
+        This endpoint reports counts and never touches environments or rendering,
+        so it has no use for the rest and no reason to fail if one is missing.
+        """
+        self.workspace_env_manager = getattr(app, "workspace_env_manager", None)
+
+    def get(self):
+        manager = self.workspace_env_manager
+        workspaces = []
+        if manager is not None:
+            for workspace_id, space in manager.workspace_spaces():
+                entry = space.activity()
+                entry["workspace_id"] = str(workspace_id)
+                workspaces.append(entry)
+        self.write({"workspaces": workspaces})
