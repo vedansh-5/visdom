@@ -28,6 +28,10 @@ from visdom.utils.server_utils import LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
 
 
+# How long a disk scan is reused before the directories are walked again.
+DISK_SCAN_TTL = 30.0
+
+
 def build_state(storage, eager=False, ensure_main=True):
     """Build an in-memory env-state dict from a storage backend, mirroring
     Application.load_state but reusable for any workspace's storage."""
@@ -159,6 +163,9 @@ class WorkspaceEnvManager:
         self.save_threshold = save_threshold
         self._spaces = {None: default_space}
         self._lock = threading.Lock()
+        self._disk_lock = threading.Lock()
+        self._disk_cache = {}
+        self._disk_scanned_at = None
 
     def space(self, workspace_id, slug=None):
         """Return the WorkspaceSpace for a workspace id, creating it on first use.
@@ -192,6 +199,58 @@ class WorkspaceEnvManager:
             return [
                 (wid, space) for wid, space in self._spaces.items() if wid is not None
             ]
+
+    def stored_workspaces(self):
+        """Every workspace with a directory on disk, with its size and last write.
+
+        ``workspace_spaces`` only knows the workspaces something has touched since
+        this process started, so on its own it reports a freshly restarted server
+        as having no workspaces at all. Disk is the durable record, and it is what
+        makes a dormant workspace distinguishable from one that has merely not
+        been visited yet.
+
+        Cached, because this walks every workspace's files and neither a size nor
+        a last write needs to be accurate to the second.
+        """
+        if self.base_env_path is None:
+            return {}
+
+        now = time.monotonic()
+        with self._disk_lock:
+            if (
+                self._disk_scanned_at is not None
+                and now - self._disk_scanned_at < DISK_SCAN_TTL
+            ):
+                return self._disk_cache
+
+        root = os.path.join(self.base_env_path, "workspaces")
+        found = {}
+        try:
+            entries = list(os.scandir(root))
+        except OSError:
+            entries = []
+
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            total = 0
+            newest = 0.0
+            try:
+                for item in os.scandir(entry.path):
+                    try:
+                        stat = item.stat()
+                    except OSError:
+                        continue
+                    total += stat.st_size
+                    newest = max(newest, stat.st_mtime)
+            except OSError:
+                continue
+            found[entry.name] = {"bytes": total, "last_active_at": newest or None}
+
+        with self._disk_lock:
+            self._disk_cache = found
+            self._disk_scanned_at = now
+        return found
 
     def _create_space(self, workspace_id):
         if self.base_env_path is None:

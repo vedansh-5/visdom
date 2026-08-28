@@ -1260,10 +1260,30 @@ class ActivityHandler(BaseHandler):
 
     def get(self):
         manager = self.workspace_env_manager
-        workspaces = []
+        workspaces = {}
         if manager is not None:
             for workspace_id, space in manager.workspace_spaces():
                 entry = space.activity()
                 entry["workspace_id"] = str(workspace_id)
-                workspaces.append(entry)
-        self.write({"workspaces": workspaces})
+                workspaces[entry["workspace_id"]] = entry
+
+            # Every instance shares the env volume, so the disk pass also turns up
+            # workspaces this instance does not serve. Reporting them is harmless
+            # and it is what lets a caller see a workspace nobody has touched since
+            # the last restart, which the socket pass alone cannot show.
+            for workspace_id, stored in manager.stored_workspaces().items():
+                entry = workspaces.setdefault(
+                    workspace_id,
+                    {
+                        "workspace_id": workspace_id,
+                        "slug": None,
+                        "viewers": 0,
+                        "writers": 0,
+                        "last_active_at": None,
+                    },
+                )
+                entry["bytes"] = stored["bytes"]
+                if not entry.get("last_active_at"):
+                    entry["last_active_at"] = stored["last_active_at"]
+
+        self.write({"workspaces": list(workspaces.values())})
