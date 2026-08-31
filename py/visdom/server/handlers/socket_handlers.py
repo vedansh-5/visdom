@@ -23,7 +23,12 @@ from enum import Enum
 
 import tornado.ioloop
 import tornado.escape
-from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
+from visdom.server.handlers.base_handlers import (
+    BaseWebSocketHandler,
+    BaseHandler,
+    WorkspaceScopedMixin,
+)
+from visdom.server.workspace_manager import WorkspaceAuthError
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
@@ -38,6 +43,10 @@ from visdom.utils.server_utils import (
     notify,
 )
 from visdom.experiments import retarget_experiment
+
+# RFC 6455 close codes, so a denied client can tell refusal from a dropped link.
+WS_POLICY_VIOLATION = 1008
+WS_TRY_AGAIN_LATER = 1013
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -69,6 +78,17 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
+        # Scope this socket to its workspace before it registers, so its env list
+        # and every broadcast it sends/receives stay within that workspace.
+        try:
+            resolved = self.resolve_workspace()
+        except WorkspaceAuthError as exc:
+            code = WS_TRY_AGAIN_LATER if exc.status_code >= 500 else WS_POLICY_VIOLATION
+            self.close(code, exc.message)
+            return
+        if resolved is not None:
+            workspace_id, _role = resolved
+            self.bind_workspace(workspace_id)
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):
             self.eid = "main"
@@ -632,7 +652,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         """Compatibility entry point for the ServerState polling reaper."""
         return self.server_state.reap_stale_connections()
 
-    def close(self):
+    def close(self, code=None, reason=None):
         self.on_close()
 
     def write_message(self, msg):
@@ -721,8 +741,8 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         self.broadcast_layouts([self])
         broadcast_envs(self, [self])
 
-    def initialize(self, server_state):
-        super().initialize(server_state)
+    def initialize(self, server_state=None, **kwargs):
+        super().initialize(server_state, **kwargs)
         self.broadcast_layouts()
 
     def on_close(self):

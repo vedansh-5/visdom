@@ -1,0 +1,9 @@
+.venv
+venv
+node_modules
+__pycache__
+*.pyc
+.git
+.pytest_cache
+cypress
+test

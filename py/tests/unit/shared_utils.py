@@ -118,6 +118,50 @@ def test_encoder_writes_null_not_nan():
     assert json.loads(encoded) == {"y": [1.0, None, None, None]}
 
 
+def test_encoder_serialises_numpy_scalars():
+    """Numpy scalars that are not float64 still encode.
+
+    ``np.int64`` and ``np.float32`` are not json-serializable on their own, and
+    only the sanitising pass coerces them, so the fast path has to fall back for
+    them exactly as it does for a NaN. Encoding raised TypeError when it caught
+    only the NaN case.
+    """
+    payload = {
+        "i": np.int64(3),
+        "f": np.float32(0.1),
+        "b": np.bool_(True),
+        "cumulative": list(np.cumsum(np.array([1.1, 2.2], dtype=np.float32))),
+    }
+
+    decoded = json.loads(json.dumps(payload, cls=NanSafeEncoder))
+
+    assert decoded["i"] == 3
+    assert decoded["b"] is True
+    assert decoded["f"] == np.float32(0.1).item()
+    assert decoded["cumulative"] == [
+        v.item() for v in np.cumsum(np.array([1.1, 2.2], dtype=np.float32))
+    ]
+
+
+def test_encoder_matches_the_sanitising_path_exactly():
+    """The fast path and the rebuild produce the same bytes.
+
+    The fast path exists only as an optimisation, so any payload it handles has
+    to encode identically to one that goes the long way round.
+    """
+    for payload in (
+        {"y": [0.1, 0.2]},
+        {"y": [np.float64(0.1)]},
+        {"y": [np.float32(0.1)]},
+        {"y": [np.int64(7)]},
+        {"y": (1.0, 2.0)},
+        {"y": [1.0, float("nan")]},
+    ):
+        assert json.dumps(payload, cls=NanSafeEncoder) == json.dumps(
+            _sanitize_nans(payload)
+        )
+
+
 def test_encoder_covers_the_streaming_path():
     """dump() to a stream goes through iterencode, which is patched separately."""
     stream = io.StringIO()

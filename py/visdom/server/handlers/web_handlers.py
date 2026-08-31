@@ -72,6 +72,18 @@ logger = logging.getLogger(__name__)
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
+# TODO abstract out any direct references to the app where possible from
+# all handlers. Can instead provide accessor functions on the state?
+
+
+def build_cloud_context(slug, role):
+    """Serialise the console context for the index template, or None when not in a workspace."""
+    if not slug:
+        return None
+    payload = json.dumps({"slug": slug, "role": role})
+    return payload.replace("</", "<\\/")
+
+
 class PostHandler(BaseHandler):
     @check_auth
     @check_readonly
@@ -769,6 +781,9 @@ class IndexHandler(BaseHandler):
             self.render(
                 "index.html",
                 wrap_socket=self.wrap_socket,
+                cloud_context=build_cloud_context(
+                    self.workspace_slug, self.workspace_role
+                ),
             )
         elif self.login_enabled:
             items = gather_envs(self.state, self.storage)
@@ -1427,3 +1442,58 @@ class TagsHandler(BaseHandler):
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
+
+
+class ActivityHandler(BaseHandler):
+    """Reports who is connected to each workspace this instance currently holds.
+
+    Only ever the instance's own share of them: the proxy hashes each workspace
+    onto exactly one instance, so a caller wanting the whole deployment asks every
+    instance and concatenates. Carries no environment data or plot contents, only
+    counts, but it does name every workspace on the instance, so the proxy keeps it
+    off the public surface and it is reached directly over the internal network.
+    """
+
+    # Registered against the application rather than a state, because it
+    # reports on every workspace rather than acting inside one. Named apart from
+    # the inherited accessor so it does not collide with that read-only view.
+    _manager = None
+
+    def initialize(self, app=None):
+        """Take only the workspace manager, not a state to act within.
+
+        This endpoint reports counts and never touches environments or
+        rendering, so it has no use for the rest and no reason to fail if one is
+        missing.
+        """
+        self._manager = getattr(app, "workspace_env_manager", None)
+
+    def get(self):
+        manager = self._manager
+        workspaces = {}
+        if manager is not None:
+            for workspace_id, space in manager.workspace_spaces():
+                entry = space.activity()
+                entry["workspace_id"] = str(workspace_id)
+                workspaces[entry["workspace_id"]] = entry
+
+            # Every instance shares the env volume, so the disk pass also turns up
+            # workspaces this instance does not serve. Reporting them is harmless
+            # and it is what lets a caller see a workspace nobody has touched since
+            # the last restart, which the socket pass alone cannot show.
+            for workspace_id, stored in manager.stored_workspaces().items():
+                entry = workspaces.setdefault(
+                    workspace_id,
+                    {
+                        "workspace_id": workspace_id,
+                        "slug": None,
+                        "viewers": 0,
+                        "writers": 0,
+                        "last_active_at": None,
+                    },
+                )
+                entry["bytes"] = stored["bytes"]
+                if not entry.get("last_active_at"):
+                    entry["last_active_at"] = stored["last_active_at"]
+
+        self.write({"workspaces": list(workspaces.values())})
