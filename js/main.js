@@ -50,6 +50,7 @@ import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
+import WorkspaceBadge from './topbar/WorkspaceBadge';
 import WidthProvider from './Width';
 
 const jsonpatch = require('fast-json-patch');
@@ -1229,6 +1230,12 @@ const App = () => {
         >
           {filterControl}
           &nbsp;&nbsp;
+          {window.VISDOM_CLOUD ? (
+            <>
+              <WorkspaceBadge slug={window.VISDOM_CLOUD.slug} />
+              &nbsp;&nbsp;
+            </>
+          ) : null}
           {connectionIndicator}
         </span>
       </div>

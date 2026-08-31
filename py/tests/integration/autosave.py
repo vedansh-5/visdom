@@ -16,8 +16,10 @@ threshold) and the bookkeeping that keeps them from writing more than needed.
 """
 
 import json
+import os
 import tempfile
 import unittest
+from collections import Counter
 from unittest import mock
 
 import pytest
@@ -348,6 +350,71 @@ class TestSocketCommandsMarkTheirWrites(unittest.TestCase):
 
         self.assertIn("win_0", self.handler.state["main"]["jsons"])
         self.assertEqual(self.handler.dirtied, [])
+
+
+class TestWorkspaceAutosaveIsolation(AutosaveTestCase):
+    """Dirty tracking follows the workspace, not the server.
+
+    An eid like ``main`` exists in every workspace, so a single shared counter
+    would confuse one workspace's unsaved work with another's, and the timer
+    would save the wrong file or none at all.
+    """
+
+    save_threshold = 0
+
+    def space(self, workspace_id):
+        return self.app.workspace_env_manager.space(workspace_id)
+
+    def test_marking_one_workspace_leaves_the_others_clean(self):
+        self.space("ws-a").mark_dirty("main")
+
+        self.assertEqual(self.space("ws-a").dirty_envs["main"], 1)
+        self.assertEqual(self.space("ws-b").dirty_envs.get("main", 0), 0)
+        self.assertEqual(self.app.dirty_envs.get("main", 0), 0)
+
+    def test_a_workspace_saves_into_its_own_directory(self):
+        space = self.space("ws-a")
+        space.state["expt"] = {"jsons": {}, "reload": {}}
+        space.mark_dirty("expt")
+
+        self.assertEqual(space.flush_dirty(), ["expt"])
+
+        expected = os.path.join(self._tmp.name, "workspaces", "ws-a", "expt.json")
+        self.assertTrue(os.path.isfile(expected))
+        self.assertNotIn("expt", self.app.storage.list_envs())
+
+    def test_the_timer_flushes_every_workspace_not_just_the_bound_one(self):
+        for workspace in ("ws-a", "ws-b"):
+            space = self.space(workspace)
+            space.state["expt"] = {"jsons": {}, "reload": {}}
+            space.mark_dirty("expt")
+        self.app.state["solo"] = {"jsons": {}, "reload": {}}
+        self.app.mark_dirty("solo")
+
+        self.app.flush_dirty()
+
+        for workspace in ("ws-a", "ws-b"):
+            self.assertEqual(self.space(workspace).dirty_envs, Counter())
+            self.assertIn("expt", self.space(workspace).storage.list_envs())
+        self.assertIn("solo", self.app.storage.list_envs())
+
+    def test_a_handler_marks_the_workspace_it_is_bound_to(self):
+        handler = AnySocketHandlerOrWrapper.__new__(AnySocketHandlerOrWrapper)
+        handler.server_state = self.app.server_state
+
+        handler.bind_workspace("ws-a")
+        handler.mark_dirty("main")
+
+        self.assertEqual(self.space("ws-a").dirty_envs["main"], 1)
+        self.assertEqual(self.app.dirty_envs.get("main", 0), 0)
+
+    def test_a_memory_only_workspace_does_not_hoard_marks(self):
+        app = Application(port=8097, env_path=None)
+        space = app.workspace_env_manager.space("ws-a")
+        space.mark_dirty("main")
+
+        self.assertEqual(space.flush_dirty(), [])
+        self.assertEqual(space.dirty_envs, Counter())
 
 
 if __name__ == "__main__":

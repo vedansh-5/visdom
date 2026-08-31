@@ -16,11 +16,19 @@ import os
 import platform
 import time
 
+import tornado.ioloop
 import tornado.web  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 from visdom.utils.server_utils import LazyEnvData
 from visdom.data_model.json_store import JSONStore
+from visdom.server.workspace_manager import WorkspaceManager
+from visdom.server.workspace_env_manager import WorkspaceEnvManager
+from visdom.server.ownership import (
+    OwnershipMonitor,
+    WS_TRY_AGAIN_LATER,
+    local_address,
+)
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -33,6 +41,7 @@ from visdom.server.handlers.experiments_handler import (
     make_live_queue,
 )
 from visdom.server.handlers.web_handlers import (
+    ActivityHandler,
     CloseHandler,
     CompareHandler,
     DataHandler,
@@ -98,8 +107,10 @@ class Application(tornado.web.Application):
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.storage = JSONStore(env_path)
+        self.workspace_manager = WorkspaceManager()
         self.state = self.load_state()
         self.user_settings = self.load_user_settings()
+        self.ownership_monitor = None
         self.subs = {}
         self.sources = {}
         self.port = port
@@ -136,6 +147,18 @@ class Application(tornado.web.Application):
             save_threshold=save_threshold,
         )
         self.server_state.live_updates = make_live_queue(self.server_state)
+
+        # Built after the server's own state, because every workspace inherits
+        # its configuration and workspace None simply is it.
+        self.workspace_env_manager = WorkspaceEnvManager(
+            base_env_path=env_path,
+            default_state=self.server_state,
+            eager=self.eager_data_loading,
+        )
+        # Handlers reach both through whichever state is bound, so a workspace's
+        # state can rebind just as the server's can.
+        self.server_state.workspace_manager = self.workspace_manager
+        self.server_state.workspace_env_manager = self.workspace_env_manager
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         # A traceback and the raw request are debugging aids, not something to
@@ -203,6 +226,7 @@ class Application(tornado.web.Application):
                 server_state_args,
             ),
             (r"%s/health" % self.base_url, HealthHandler),
+            (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -257,12 +281,77 @@ class Application(tornado.web.Application):
         return self.server_state.flush_envs(eids)
 
     def flush_dirty(self):
-        """Compatibility wrapper for flushing dirty environments."""
-        return self.server_state.flush_dirty()
+        """Persist changed environments in every workspace, not just this one.
+
+        ``ServerState.flush_dirty`` only knows its own state, which on a
+        multi-tenant server is the state no tenant is using. A workspace nobody
+        happens to be looking at when the timer fires still has to be written.
+        """
+        written = []
+        for state in self.workspace_env_manager.spaces():
+            written.extend(state.flush_dirty())
+        return written
+
+    def start_autosave(self):
+        """Save changed environments on a timer, across every workspace.
+
+        Started here rather than on ``ServerState`` so the callback is the
+        application's ``flush_dirty``, which walks all of them.
+        """
+        if self.server_state.autosave is None and self.server_state.save_interval > 0:
+            self.server_state.autosave = tornado.ioloop.PeriodicCallback(
+                self.flush_dirty, self.server_state.save_interval * 1000
+            )
+            self.server_state.autosave.start()
+        return self.server_state.autosave
 
     def start_autosave(self):
         """Compatibility wrapper for starting ServerState autosave."""
         return self.server_state.start_autosave()
+
+    def start_ownership_monitor(self):
+        """Begin checking whether this instance still owns the workspaces it holds
+        sockets for. A no-op unless VISDOM_PROXY_URL names the proxy to ask."""
+        proxy_url = os.environ.get("VISDOM_PROXY_URL")
+        if not proxy_url or self.ownership_monitor is not None:
+            return self.ownership_monitor
+        try:
+            interval = int(os.environ.get("VISDOM_OWNERSHIP_INTERVAL", "30"))
+        except ValueError:
+            interval = 30
+        self.ownership_monitor = OwnershipMonitor(
+            self,
+            proxy_url,
+            "%s/_shard" % self.base_url,
+            interval,
+            local_address(self.port),
+        )
+        self.ownership_monitor.start()
+        logging.info(
+            "ownership monitor on, asking %s every %ds as %s",
+            proxy_url,
+            interval,
+            self.ownership_monitor.self_address,
+        )
+        return self.ownership_monitor
+
+    def drain_sockets(self, reason="server shutting down, reconnect"):
+        """Close every live viewer socket with a retryable code."""
+        spaces = [self.workspace_env_manager.space(None)]
+        spaces += [
+            space for _wid, space in self.workspace_env_manager.workspace_spaces()
+        ]
+        closed = 0
+        for space in spaces:
+            for sub in list(space.subs.values()):
+                try:
+                    sub.close(WS_TRY_AGAIN_LATER, reason)
+                    closed += 1
+                except Exception as exc:
+                    logging.debug("could not close a socket while draining: %s", exc)
+        if closed:
+            logging.info("drained %d socket(s) before shutdown", closed)
+        return closed
 
     def save_layouts(self):
         """Compatibility wrapper for callers that still use ``Application``."""

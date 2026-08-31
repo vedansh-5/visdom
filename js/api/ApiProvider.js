@@ -6,11 +6,18 @@ import ApiContext from './ApiContext';
 import Poller from './Legacy';
 import serverPath from './serverPath';
 
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_CAP_MS = 30000;
+const WS_POLICY_VIOLATION = 1008;
+
 const ApiProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
   const apiHandlers = useRef(null);
+  const _offline = useRef(false);
+  const _retryTimer = useRef(null);
+  const _retries = useRef(0);
 
   // ---------------- //
   // helper functions //
@@ -51,13 +58,37 @@ const ApiProvider = ({ children }) => {
     }
   };
 
+  const cancelRetry = () => {
+    if (_retryTimer.current !== null) {
+      clearTimeout(_retryTimer.current);
+      _retryTimer.current = null;
+    }
+  };
+
+  const scheduleReconnect = () => {
+    if (_offline.current || _retryTimer.current !== null) {
+      return;
+    }
+    const window_ms = Math.min(
+      RECONNECT_CAP_MS,
+      RECONNECT_BASE_MS * Math.pow(2, _retries.current)
+    );
+    _retries.current += 1;
+    _retryTimer.current = setTimeout(() => {
+      _retryTimer.current = null;
+      connect();
+    }, Math.random() * window_ms);
+  };
+
   // Establish a connection to the server
   const connect = () => {
     if (_socket.current) {
       return;
     }
+    _offline.current = false;
 
     const _onConnect = () => {
+      _retries.current = 0;
       setConnected(true);
     };
     const _onDisconnect = () => {
@@ -68,11 +99,16 @@ const ApiProvider = ({ children }) => {
 
     // eslint-disable-next-line no-undef
     if (USE_POLLING) {
+      const _onPollerDisconnect = () => {
+        _socket.current = null;
+        _onDisconnect();
+        scheduleReconnect();
+      };
       _socket.current = new Poller(
         correctPathname,
         handleMessage,
         _onConnect,
-        _onDisconnect
+        _onPollerDisconnect
       );
       return;
     }
@@ -109,14 +145,20 @@ const ApiProvider = ({ children }) => {
           `Reason: ${event.reason || '(no reason provided)'}`
         );
       }
-      // Only call _onDisconnect from onclose to avoid duplicate handling
+      _socket.current = null;
       _onDisconnect();
+      if (event.code !== WS_POLICY_VIOLATION) {
+        scheduleReconnect();
+      }
     };
     _socket.current = socket;
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
+    _offline.current = true;
+    cancelRetry();
+    _retries.current = 0;
     if (_socket.current) {
       _socket.current.close();
       _socket.current = null;

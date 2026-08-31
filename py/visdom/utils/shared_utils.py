@@ -210,10 +210,25 @@ class NanSafeEncoder(json.JSONEncoder):
 
     Standard JSON does not support NaN/Inf. This encoder handles them
     automatically so callers don't need manual nan2none() preprocessing.
+
+    Payloads carrying no NaN or Inf, which is nearly all of them, are encoded
+    without the rebuild: ``allow_nan=False`` makes the encoder itself raise on
+    the first one, and only then is the copy worth making.
     """
 
-    def encode(self, o):
-        return super().encode(_sanitize_nans(o))
-
     def iterencode(self, o, _one_shot=False):
+        allow_nan, self.allow_nan = self.allow_nan, False
+        try:
+            return list(super().iterencode(o, _one_shot=_one_shot))
+        except ValueError:
+            # A NaN or Inf, which allow_nan=False turns into this.
+            pass
+        except TypeError:
+            # A numpy scalar that is not a float64, such as an int64 from
+            # X.min() on an integer array or a float32 from a downcast array.
+            # Those are not json-serializable on their own, and the rebuild is
+            # what coerces them, so it is needed here as much as for a NaN.
+            pass
+        finally:
+            self.allow_nan = allow_nan
         return super().iterencode(_sanitize_nans(o), _one_shot=_one_shot)
