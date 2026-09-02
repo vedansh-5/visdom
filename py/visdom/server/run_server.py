@@ -146,7 +146,7 @@ def start_server(
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
-    atexit.register(app.storage.save_all, app.state)
+    atexit.register(app.shutdown_storage)
     signal.signal(signal.SIGTERM, _drain_then_exit(app, server))
 
     app.start_autosave()
