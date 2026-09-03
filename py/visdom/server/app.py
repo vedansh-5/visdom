@@ -14,7 +14,9 @@ all of the required state about the currently running server.
 import logging
 import os
 import platform
+import threading
 import time
+from concurrent.futures import Future
 
 import tornado.ioloop
 import tornado.web  # noqa E402: gotta install ioloop first
@@ -85,6 +87,40 @@ tornado_settings = {
     "template_path": get_visdom_path("static"),
     "compiled_template_cache": False,
 }
+
+
+def _combine_written(futures):
+    """One future over several writes, resolving to every id that reached disk.
+
+    The writes come back as futures belonging to the IO loop, which resolve on
+    the loop rather than blocking, so they cannot be waited on from the storage
+    worker or from any other thread. Completion is followed with callbacks
+    instead: each write reports as it settles, and the combined future is
+    resolved once the last one has. The first failure is what the caller sees,
+    since a write that raised has already been logged and retried by the state
+    that owns it.
+    """
+    combined = Future()
+    written = []
+    lock = threading.Lock()
+    outstanding = len(futures)
+
+    def settle(future):
+        nonlocal outstanding
+        with lock:
+            try:
+                written.extend(future.result())
+            except Exception as exc:
+                if not combined.done():
+                    combined.set_exception(exc)
+            outstanding -= 1
+            finished = outstanding == 0
+        if finished and not combined.done():
+            combined.set_result(written)
+
+    for future in futures:
+        future.add_done_callback(settle)
+    return combined
 
 
 class Application(tornado.web.Application):
@@ -298,9 +334,7 @@ class Application(tornado.web.Application):
         happens to be looking at when the timer fires still has to be written.
 
         One future comes back for all of them, so a caller waits the same way
-        it would for a single state. Every space shares the one storage worker
-        and it runs its queue in order, so a task submitted after the writes
-        finds them all finished and simply collects what each reported.
+        it would for a single state.
         """
         futures = [
             future
@@ -311,11 +345,7 @@ class Application(tornado.web.Application):
         ]
         if not futures:
             return None
-        if len(futures) == 1:
-            return futures[0]
-        return self.server_state.storage_executor.submit(
-            lambda: [eid for future in futures for eid in future.result()]
-        )
+        return _combine_written(futures)
 
     def start_autosave(self):
         """Save changed environments on a timer, across every workspace.

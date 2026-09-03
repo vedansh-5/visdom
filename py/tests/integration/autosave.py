@@ -21,6 +21,7 @@ instead (see ``_run_storage_inline``) and read the result off that future, which
 keeps the assertions from racing a thread pool.
 """
 
+import asyncio
 import json
 import os
 import tempfile
@@ -673,3 +674,43 @@ class TestWorkspaceAutosaveIsolation(AutosaveTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFlushAcrossWorkspacesOnTheRealWorker(unittest.TestCase):
+    """The combined flush resolves against a real loop and a real worker.
+
+    Every other test here runs storage inline and gets a settled future back,
+    which cannot show what happens while a write is still in flight. A write
+    belongs to the IO loop and resolves on it, so anything that reads those
+    results from another thread sees them pending and fails. Only a real loop
+    puts that ordering under test.
+    """
+
+    def test_the_combined_future_waits_for_every_workspace(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        app = Application(port=8097, env_path=tmp.name)
+        workspaces = ("ws-a", "ws-b", "ws-c")
+        for workspace in workspaces:
+            space = app.workspace_env_manager.space(workspace)
+            space.state["expt"] = {"jsons": {}, "reload": {}}
+            space.mark_dirty("expt")
+
+        async def flush():
+            return await asyncio.wrap_future(app.flush_dirty())
+
+        loop = tornado.ioloop.IOLoop(make_current=True)
+        try:
+            written = loop.run_sync(flush)
+        finally:
+            loop.close()
+
+        self.assertEqual(written, ["expt"] * len(workspaces))
+        for workspace in workspaces:
+            space = app.workspace_env_manager.space(workspace)
+            self.assertEqual(space.dirty_envs, Counter())
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(tmp.name, "workspaces", workspace, "expt.json")
+                )
+            )
