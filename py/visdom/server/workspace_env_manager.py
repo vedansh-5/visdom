@@ -84,10 +84,16 @@ class WorkspaceState(ServerState):
     workspace at all.
     """
 
-    def __init__(self, *, slug=None, **kwargs):
+    def __init__(self, *, slug=None, storage_executor=None, **kwargs):
         super().__init__(**kwargs)
         self.slug = slug
         self.last_write_at = None
+        if storage_executor is not None:
+            # One worker per workspace would mean a thread per tenant held for
+            # the life of the process, and the ordering the single worker exists
+            # to guarantee holds just as well across workspaces as within one.
+            self.storage_executor.shutdown(wait=False)
+            self.storage_executor = storage_executor
 
     def mark_dirty(self, eid):
         """Persist as usual, and remember that this workspace was written to."""
@@ -101,12 +107,13 @@ class WorkspaceState(ServerState):
         written, so it is retried rather than silently dropped. With no path to
         write to nothing is ever reported, so the marks would accumulate for the
         life of the process against a workspace that is memory-only by
-        construction.
+        construction. ``None`` is what a caller gets when there was no write to
+        wait on, which is exactly the case here.
         """
         if self.env_path is None:
             for eid in list(eids):
                 self.dirty_envs.pop(eid, None)
-            return []
+            return None
         return super().flush_envs(eids)
 
     def last_active_at(self):
@@ -261,6 +268,7 @@ class WorkspaceEnvManager:
         }
         state = WorkspaceState(
             slug=slug,
+            storage_executor=self.default_state.storage_executor,
             state=build_state(storage, eager=self.eager),
             subs={},
             sources={},

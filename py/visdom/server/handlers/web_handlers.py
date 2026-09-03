@@ -35,6 +35,7 @@ from visdom.utils.shared_utils import (
 from visdom.utils.server_utils import (
     check_auth,
     check_readonly,
+    ensure_env_loaded,
     check_readonly_message,
     reject_readonly,
     extract_eid,
@@ -52,6 +53,7 @@ from visdom.utils.server_utils import (
     stringify,
     push_deleted,
     clear_deleted,
+    delete_env_off_loop,
     notify,
     LazyEnvData,
 )
@@ -87,7 +89,7 @@ def build_cloud_context(slug, role):
 class PostHandler(BaseHandler):
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -101,6 +103,7 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
+        await ensure_env_loaded(self, eid)
 
         p = window(req)
         register_window(self, p, eid)
@@ -118,10 +121,11 @@ class ExistsHandler(BaseHandler):
             handler.write("false")
 
     @check_auth
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
@@ -504,13 +508,14 @@ class UpdateHandler(BaseHandler):
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
             return
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
@@ -530,33 +535,45 @@ class CloseHandler(BaseHandler):
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
 class DeleteEnvHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        """Drop an env, answering with the future for its removal from disk.
+
+        The env leaves memory and the subscribers hear about it here; only the
+        file removal is handed to the storage worker, so callers that need the
+        disk to be settled -- the request handler below, and tests -- await
+        what comes back. ``None`` means there was nothing to delete.
+        """
         eid = args.get("eid")
-        if eid is not None:
-            eid = escape_eid(eid)
-            if eid == "main":
-                return
-            handler.state.pop(eid, None)
-            clear_deleted(handler.storage, eid)
-            handler.storage.delete_env(eid)
-            broadcast_envs(handler)
+        if eid is None:
+            return None
+        eid = escape_eid(eid)
+        if eid == "main":
+            return None
+        handler.state.pop(eid, None)
+        clear_deleted(handler.storage, eid)
+        removal = delete_env_off_loop(handler, eid)
+        broadcast_envs(handler)
+        return removal
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        removal = self.wrap_func(self, args)
+        if removal is not None:
+            await removal
 
 
 class EnvStateHandler(BaseHandler):
@@ -754,10 +771,11 @@ class DataHandler(BaseHandler):
                 )
 
     @check_auth
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 

@@ -268,6 +268,16 @@ class Application(tornado.web.Application):
         return self.server_state.autosave
 
     @property
+    def storage_executor(self):
+        """Compatibility view of the ServerState storage worker."""
+        return self.server_state.storage_executor
+
+    @property
+    def saving_envs(self):
+        """Compatibility view of environments with a write in flight."""
+        return self.server_state.saving_envs
+
+    @property
     def live_updates(self):
         """Compatibility view of the ServerState hparams refresh queue."""
         return self.server_state.live_updates
@@ -286,11 +296,26 @@ class Application(tornado.web.Application):
         ``ServerState.flush_dirty`` only knows its own state, which on a
         multi-tenant server is the state no tenant is using. A workspace nobody
         happens to be looking at when the timer fires still has to be written.
+
+        One future comes back for all of them, so a caller waits the same way
+        it would for a single state. Every space shares the one storage worker
+        and it runs its queue in order, so a task submitted after the writes
+        finds them all finished and simply collects what each reported.
         """
-        written = []
-        for state in self.workspace_env_manager.spaces():
-            written.extend(state.flush_dirty())
-        return written
+        futures = [
+            future
+            for future in (
+                state.flush_dirty() for state in self.workspace_env_manager.spaces()
+            )
+            if future is not None
+        ]
+        if not futures:
+            return None
+        if len(futures) == 1:
+            return futures[0]
+        return self.server_state.storage_executor.submit(
+            lambda: [eid for future in futures for eid in future.result()]
+        )
 
     def start_autosave(self):
         """Save changed environments on a timer, across every workspace.
@@ -304,10 +329,6 @@ class Application(tornado.web.Application):
             )
             self.server_state.autosave.start()
         return self.server_state.autosave
-
-    def start_autosave(self):
-        """Compatibility wrapper for starting ServerState autosave."""
-        return self.server_state.start_autosave()
 
     def start_ownership_monitor(self):
         """Begin checking whether this instance still owns the workspaces it holds
@@ -352,6 +373,29 @@ class Application(tornado.web.Application):
         if closed:
             logging.info("drained %d socket(s) before shutdown", closed)
         return closed
+
+    def stop_autosave(self):
+        """Stop the timer, so no further tick can queue a write."""
+        if self.server_state.autosave is not None:
+            self.server_state.autosave.stop()
+            self.server_state.autosave = None
+
+    def shutdown_storage(self):
+        """Drain and save every workspace, not just this server's own state.
+
+        ``ServerState.shutdown_storage`` saves the one state it belongs to,
+        which on a multi-tenant server holds nothing a tenant wrote. The worker
+        is shared, so draining it once covers every workspace's queued writes;
+        the final save is then per space, or a workspace keeps only whatever
+        happened to reach disk before the drain.
+        """
+        self.stop_autosave()
+        self.server_state.storage_executor.shutdown(wait=True)
+        for state in self.workspace_env_manager.spaces():
+            if state.env_path is not None:
+                state.storage.save_all(state.state)
+            state.dirty_envs.clear()
+            state.saving_envs.clear()
 
     def save_layouts(self):
         """Compatibility wrapper for callers that still use ``Application``."""
