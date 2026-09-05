@@ -657,7 +657,7 @@ class EnvHandler(BaseHandler):
                         self.subs[sid],
                         self.storage,
                     )
-                except ValueError as e:
+                except ValueError:
                     notify(
                         self,
                         "Could not load environment: invalid environment JSON format",
@@ -701,7 +701,7 @@ class CompareHandler(BaseHandler):
                     self.storage,
                     show_all=show_all,
                 )
-            except ValueError as e:
+            except ValueError:
                 notify(
                     self,
                     "Could not compare environments: invalid environment JSON format",
