@@ -301,6 +301,11 @@ class Application(tornado.web.Application):
         return self.server_state.dirty_envs
 
     @property
+    def saving_envs(self):
+        """Compatibility view of environments with a write in flight."""
+        return self.server_state.saving_envs
+
+    @property
     def autosave(self):
         """Compatibility view of the ServerState autosave timer."""
         return self.server_state.autosave
@@ -309,11 +314,6 @@ class Application(tornado.web.Application):
     def storage_executor(self):
         """Compatibility view of the ServerState storage worker."""
         return self.server_state.storage_executor
-
-    @property
-    def saving_envs(self):
-        """Compatibility view of environments with a write in flight."""
-        return self.server_state.saving_envs
 
     @property
     def live_updates(self):
@@ -429,9 +429,9 @@ class Application(tornado.web.Application):
             state.dirty_envs.clear()
             state.saving_envs.clear()
 
-    def save_layouts(self):
+    def save_layouts(self, layouts=None):
         """Compatibility wrapper for callers that still use ``Application``."""
-        self.server_state.save_layouts()
+        self.server_state.save_layouts(layouts)
 
     def load_layouts(self):
         """Read layouts through the configured ``DataStore`` backend."""
