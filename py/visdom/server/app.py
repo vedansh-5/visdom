@@ -44,6 +44,7 @@ from visdom.server.handlers.experiments_handler import (
 )
 from visdom.server.handlers.web_handlers import (
     ActivityHandler,
+    MetricsHandler,
     CloseHandler,
     CompareHandler,
     DataHandler,
@@ -263,6 +264,7 @@ class Application(tornado.web.Application):
             ),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
+            (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)

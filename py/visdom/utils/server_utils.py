@@ -539,9 +539,9 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
                         if "name" not in data:
                             break  # stop working with this plot, not right format
-                        destWidJson["content"]["data"][dataIdx][
-                            "name"
-                        ] = "{}_{}".format(eidNums[eid], data["name"])
+                        destWidJson["content"]["data"][dataIdx]["name"] = (
+                            "{}_{}".format(eidNums[eid], data["name"])
+                        )
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
@@ -601,9 +601,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
@@ -706,13 +704,36 @@ def load_env(state, eid, socket, store):
 
 
 def broadcast(self, msg, eid):
+    sent = 0
     for s in self.subs:
         if isinstance(self.subs[s].eid, (list, dict, set)):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
+                sent += 1
         else:
             if self.subs[s].eid == eid:
                 self.subs[s].write_message(msg)
+                sent += 1
+    if sent:
+        record_workspace_broadcast(self, sent, msg)
+
+
+def record_workspace_broadcast(handler, sent, msg):
+    """Attribute a push to the workspace whose state the handler is bound to.
+
+    Guarded rather than assumed: this is called from the broadcast path, which
+    also runs for a plain single-tenant server and under test doubles that carry
+    no state at all. Counting is not worth failing a broadcast over, so anything
+    unexpected here is simply not counted.
+    """
+    record = getattr(getattr(handler, "server_state", None), "record_broadcast", None)
+    if record is None:
+        return
+    try:
+        size = len(msg) if isinstance(msg, (str, bytes)) else 0
+        record(sent, size * sent)
+    except Exception:
+        pass
 
 
 def push_deleted(store, eid, win_id, p_data):

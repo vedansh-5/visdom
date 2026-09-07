@@ -88,6 +88,12 @@ class WorkspaceState(ServerState):
         super().__init__(**kwargs)
         self.slug = slug
         self.last_write_at = None
+        # Counted here because a process serving many workspaces cannot have its
+        # own CPU divided between them afterwards. These are running totals for
+        # the life of the process, which is what a scraper expects of a counter.
+        self.writes = 0
+        self.broadcasts = 0
+        self.broadcast_bytes = 0
         if storage_executor is not None:
             # One worker per workspace would mean a thread per tenant held for
             # the life of the process, and the ordering the single worker exists
@@ -98,7 +104,18 @@ class WorkspaceState(ServerState):
     def mark_dirty(self, eid):
         """Persist as usual, and remember that this workspace was written to."""
         self.last_write_at = time.time()
+        self.writes += 1
         return super().mark_dirty(eid)
+
+    def record_broadcast(self, messages, size):
+        """Note messages pushed to this workspace's viewers.
+
+        Counted at the push rather than per subscriber pair, so a message going
+        to ten viewers is ten messages and ten times the bytes: what is being
+        measured is work the instance did, and it did it ten times.
+        """
+        self.broadcasts += messages
+        self.broadcast_bytes += size
 
     def flush_envs(self, eids):
         """Persist as usual, but never hold marks a save can never clear.
@@ -146,6 +163,9 @@ class WorkspaceState(ServerState):
             "viewers": len(self.subs),
             "writers": len(self.sources),
             "last_active_at": self.last_active_at(),
+            "writes": self.writes,
+            "broadcasts": self.broadcasts,
+            "broadcast_bytes": self.broadcast_bytes,
         }
 
 
