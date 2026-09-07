@@ -33,3 +33,24 @@ markers = [
     "integration: in-process Application, real HTTP or handler dispatch",
     "slow: takes more than a couple of seconds",
 ]
+
+[tool.ruff]
+# black already decides how the code looks. This is here for the mistakes
+# reading it cannot catch: a name used before it exists, a second definition
+# quietly replacing the first, a variable bound and then never read.
+src = ["py"]
+
+[tool.ruff.lint]
+select = ["F"]
+ignore = [
+    # Unused imports are real, and there are enough of them that clearing them
+    # belongs in its own change rather than riding along with turning the
+    # linter on.
+    "F401",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `Visdom(server=...)` is the public constructor argument and has been since
+# the beginning. It shadows the `visdom.server` module inside that scope, which
+# is what ruff is reporting, and renaming it would break every caller.
+"py/visdom/__init__.py" = ["F811"]

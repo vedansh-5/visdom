@@ -34,6 +34,22 @@ jobs:
         if: failure()
         run: echo "::warning title='Python Linter Check failed'::Please run \"pip install black; black py\" before committing code changes to python files."
 
+  lint-py-errors:
+    name: "Python Error Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install "ruff>=0.15"
+      - name: Check for Python errors
+        run: ruff check py
+      - name: Explain the failure
+        if: failure()
+        run: echo "::warning title='Python Error Check failed'::ruff found a likely bug rather than a style problem. Run \"pip install ruff; ruff check py\" to see it."
+
   install-and-build:
     name: "Install and Build"
     runs-on: ubuntu-latest
