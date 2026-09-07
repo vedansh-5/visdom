@@ -539,9 +539,9 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
                         if "name" not in data:
                             break  # stop working with this plot, not right format
-                        destWidJson["content"]["data"][dataIdx]["name"] = (
-                            "{}_{}".format(eidNums[eid], data["name"])
-                        )
+                        destWidJson["content"]["data"][dataIdx][
+                            "name"
+                        ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
@@ -601,7 +601,9 @@ def compare_envs(state, eids, socket, store, show_all=False):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(" ".join(tableRows))
+    <table> {} </table>""".format(
+        " ".join(tableRows)
+    )
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
