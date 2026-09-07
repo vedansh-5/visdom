@@ -159,3 +159,63 @@ class TestCounting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorkspacesOnlyOnDisk(unittest.TestCase):
+    """A workspace nobody has touched since the instance started.
+
+    The common case just after a restart, and the one the counters were
+    invisible in: every workspace came back from the disk pass alone, which
+    carried no counters, so the console reported them all as unavailable.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = Application(port=8097, env_path=self._tmp.name)
+
+    def gather(self):
+        from visdom.server.handlers.web_handlers import ActivityHandler
+
+        return ActivityHandler.gather(
+            types.SimpleNamespace(_manager=self.app.workspace_env_manager)
+        )
+
+    def stored_only(self):
+        """One workspace written to disk, then forgotten, as a restart would."""
+        space = self.app.workspace_env_manager.space("ws-a", slug="a")
+        space.state["expt"] = {"jsons": {}, "reload": {}}
+        space.mark_dirty("expt")
+        space.flush_dirty()
+        # Drop the in-memory state, leaving only what is on disk, which is what
+        # a restarted instance sees. The disk scan is lazy and has not run yet,
+        # so nothing has to be invalidated.
+        self.app.workspace_env_manager._states.pop("ws-a")
+
+    def test_an_untouched_workspace_reports_no_work_rather_than_no_answer(self):
+        self.stored_only()
+
+        entry = next(e for e in self.gather() if e["workspace_id"] == "ws-a")
+
+        self.assertEqual(entry["writes"], 0)
+        self.assertEqual(entry["broadcasts"], 0)
+        self.assertEqual(entry["broadcast_bytes"], 0)
+
+    def test_a_scrape_gives_it_a_value_too(self):
+        self.stored_only()
+
+        text = metrics.render([metrics.sample_from_activity(e) for e in self.gather()])
+
+        self.assertIn('visdom_workspace_writes_total{workspace="ws-a",slug=""} 0', text)
+
+    def test_a_workspace_still_held_keeps_its_real_count(self):
+        """The disk pass must not overwrite what the socket pass counted."""
+        space = self.app.workspace_env_manager.space("ws-b", slug="b")
+        space.state["expt"] = {"jsons": {}, "reload": {}}
+        for _ in range(4):
+            space.mark_dirty("expt")
+        space.flush_dirty()
+
+        entry = next(e for e in self.gather() if e["workspace_id"] == "ws-b")
+
+        self.assertEqual(entry["writes"], 4)

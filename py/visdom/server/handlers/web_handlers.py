@@ -1515,6 +1515,14 @@ class ActivityHandler(BaseHandler):
                         "viewers": 0,
                         "writers": 0,
                         "last_active_at": None,
+                        # Zero rather than absent. This instance counts, and a
+                        # workspace it has not served since starting has had no
+                        # work done on it, which is a real answer. Leaving them
+                        # out would say the counters are unavailable, which is
+                        # what a caller should be told about an older server.
+                        "writes": 0,
+                        "broadcasts": 0,
+                        "broadcast_bytes": 0,
                     },
                 )
                 entry["bytes"] = stored["bytes"]
