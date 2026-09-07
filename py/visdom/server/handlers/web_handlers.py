@@ -26,6 +26,7 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 
 import tornado.escape
+from visdom.server import metrics
 from visdom.utils.shared_utils import (
     get_rand_id,
     _coerce_image_slider_index,
@@ -1486,7 +1487,13 @@ class ActivityHandler(BaseHandler):
         """
         self._manager = getattr(app, "workspace_env_manager", None)
 
-    def get(self):
+    def gather(self):
+        """Every workspace this instance can say anything about.
+
+        Split out from ``get`` so the metrics endpoint reports the same numbers
+        rather than collecting them a second way, which is how two endpoints end
+        up disagreeing about the same deployment.
+        """
         manager = self._manager
         workspaces = {}
         if manager is not None:
@@ -1514,4 +1521,23 @@ class ActivityHandler(BaseHandler):
                 if not entry.get("last_active_at"):
                     entry["last_active_at"] = stored["last_active_at"]
 
-        self.write({"workspaces": list(workspaces.values())})
+        return list(workspaces.values())
+
+    def get(self):
+        self.write({"workspaces": self.gather()})
+
+
+class MetricsHandler(ActivityHandler):
+    """The same workspace numbers, in the format a Prometheus scrape wants.
+
+    Inherits the gathering rather than repeating it. Like the activity endpoint
+    it names every workspace on the instance, so it belongs on the internal
+    network and the proxy keeps it off the public surface.
+    """
+
+    def get(self):
+        samples = [metrics.sample_from_activity(entry) for entry in self.gather()]
+        # The version parameter is part of the format's content type. Scrapers
+        # accept a bare text/plain, but tools that inspect the header expect it.
+        self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.write(metrics.render(samples))
