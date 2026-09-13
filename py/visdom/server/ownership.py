@@ -27,7 +27,12 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import PeriodicCallback
 
 WS_TRY_AGAIN_LATER = 1013
+WS_POLICY_VIOLATION = 1008
 MOVED_REASON = "workspace moved to another instance, reconnect"
+# A moved workspace tells the client to come back; a withdrawn one must not,
+# or every viewer of a suspended workspace reconnects in a loop that the
+# gateway then has to refuse over and over.
+WITHDRAWN_REASON = "this workspace is no longer available, contact an administrator"
 UPSTREAM_HEADER = "X-Visdom-Upstream"
 
 
