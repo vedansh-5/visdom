@@ -17,7 +17,7 @@ function WorkspaceBadge(props) {
     <a
       className="btn btn-default"
       href="/"
-      title={`Workspace "${slug}" — back to the console`}
+      title={`Workspace "${slug}", back to the console`}
     >
       {slug}
     </a>
