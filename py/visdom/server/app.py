@@ -28,6 +28,8 @@ from visdom.server.workspace_manager import WorkspaceManager
 from visdom.server.workspace_env_manager import WorkspaceEnvManager
 from visdom.server.ownership import (
     OwnershipMonitor,
+    WITHDRAWN_REASON,
+    WS_POLICY_VIOLATION,
     WS_TRY_AGAIN_LATER,
     local_address,
 )
@@ -44,6 +46,7 @@ from visdom.server.handlers.experiments_handler import (
 )
 from visdom.server.handlers.web_handlers import (
     ActivityHandler,
+    EvictHandler,
     MetricsHandler,
     CloseHandler,
     CompareHandler,
@@ -265,6 +268,7 @@ class Application(tornado.web.Application):
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s/_activity" % self.base_url, ActivityHandler, {"app": self}),
             (r"%s/_metrics" % self.base_url, MetricsHandler, {"app": self}),
+            (r"%s/_evict" % self.base_url, EvictHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -404,6 +408,36 @@ class Application(tornado.web.Application):
                     logging.debug("could not close a socket while draining: %s", exc)
         if closed:
             logging.info("drained %d socket(s) before shutdown", closed)
+        return closed
+
+    def evict_workspace(self, slug, reason=WITHDRAWN_REASON):
+        """Close every socket bound to one workspace, viewers and sources alike.
+
+        A workspace is refused at the moment it is resolved, so suspending one
+        stops anybody new getting in. It does nothing to a tab already open: a
+        live socket never resolves again, so a viewer keeps watching and a
+        training run keeps writing into a workspace that has been switched off.
+        This is how the gateway says so at once rather than at the next resolve.
+
+        Sources are closed as well as subs, which is the difference from an
+        ownership eviction. A moved workspace is still somebody's to write to,
+        so its writers are left to find the new owner; a withdrawn one is not.
+
+        The code is the one a refused connection already gets, so a client sees
+        the same answer whether it arrived before or after the suspension.
+        """
+        closed = 0
+        for _workspace_id, space in self.workspace_env_manager.workspace_spaces():
+            if space.slug != slug:
+                continue
+            for socket in list(space.subs.values()) + list(space.sources.values()):
+                try:
+                    socket.close(WS_POLICY_VIOLATION, reason)
+                    closed += 1
+                except Exception as exc:
+                    logging.debug("could not close a withdrawn socket: %s", exc)
+        if closed:
+            logging.info("workspace %s withdrawn, closed %d socket(s)", slug, closed)
         return closed
 
     def stop_autosave(self):

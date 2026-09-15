@@ -1701,3 +1701,46 @@ class MetricsHandler(ActivityHandler):
         # accept a bare text/plain, but tools that inspect the header expect it.
         self.set_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         self.write(metrics.render(samples))
+
+
+class EvictHandler(BaseHandler):
+    """Closes the sockets a workspace still has open on this instance.
+
+    The gateway calls this the moment a workspace is suspended or moved to the
+    trash. Without it the refusal only takes effect at the next resolve, and a
+    socket already open never resolves again, so a tab that was watching when
+    the workspace was switched off carries on watching.
+
+    Named like the other internal endpoints and kept off the public surface the
+    same way: it acts on a workspace by name and nothing outside the deployment
+    has any business asking for that.
+    """
+
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        slug = (payload.get("workspace_slug") or "").strip()
+        if not slug:
+            self.set_status(400)
+            self.write({"error": "workspace_slug is required"})
+            return
+
+        reason = (payload.get("reason") or "").strip() or None
+        evict = getattr(self._app, "evict_workspace", None)
+        if evict is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        closed = evict(slug, reason) if reason else evict(slug)
+        self.write({"workspace_slug": slug, "closed": closed})
