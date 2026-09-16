@@ -84,6 +84,10 @@ from visdom.server.defaults import (
     DEFAULT_SAVE_THRESHOLD,
 )
 
+# Template only -- never mutate it. ``__init__`` copies it per instance because
+# several of these values are derived from constructor arguments, and writing
+# them back here leaked one server's base_url and cookie secret into the next
+# ``Application`` built in the same process.
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -161,10 +165,12 @@ class Application(tornado.web.Application):
         self.last_access = time.time()
         self.wrap_socket = use_frontend_client_polling
 
+        settings = dict(tornado_settings)
+
         if user_credential:
             self.login_enabled = True
             with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
-                tornado_settings["cookie_secret"] = fn.read()
+                settings["cookie_secret"] = fn.read()
 
         self.server_state = ServerState(
             state=self.state,
@@ -188,27 +194,22 @@ class Application(tornado.web.Application):
         )
         self.server_state.live_updates = make_live_queue(self.server_state)
 
-        # Built after the server's own state, because every workspace inherits
-        # its configuration and workspace None simply is it.
         self.workspace_env_manager = WorkspaceEnvManager(
             base_env_path=env_path,
             default_state=self.server_state,
             eager=self.eager_data_loading,
         )
-        # Handlers reach both through whichever state is bound, so a workspace's
-        # state can rebind just as the server's can.
         self.server_state.workspace_manager = self.workspace_manager
         self.server_state.workspace_env_manager = self.workspace_env_manager
+        self._workspaces_shut_down = False
 
-        tornado_settings["static_url_prefix"] = self.base_url + "/static/"
+        settings["static_url_prefix"] = self.base_url + "/static/"
         # A traceback and the raw request are debugging aids, not something to
         # hand to whoever provoked the error. `debug` was forced on for every
         # server, which put both on the 500 page -- and, being tornado's debug
         # flag, also turned on autoreload. Follow the operator's logging level
         # instead, and keep the two concerns separate.
-        tornado_settings["show_error_details"] = logging.getLogger().isEnabledFor(
-            logging.DEBUG
-        )
+        settings["show_error_details"] = logging.getLogger().isEnabledFor(logging.DEBUG)
         experiments_url = "%s/experiments" % self.base_url
         server_state_args = {"server_state": self.server_state}
         handlers = [
@@ -271,7 +272,7 @@ class Application(tornado.web.Application):
             (r"%s/_evict" % self.base_url, EvictHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
-        super(Application, self).__init__(handlers, **tornado_settings)
+        super(Application, self).__init__(handlers, **settings)
 
     def get_last_access(self):
         if len(self.subs) > 0 or len(self.sources) > 0:
@@ -441,23 +442,27 @@ class Application(tornado.web.Application):
         return closed
 
     def stop_autosave(self):
-        """Stop the timer, so no further tick can queue a write."""
-        if self.server_state.autosave is not None:
-            self.server_state.autosave.stop()
-            self.server_state.autosave = None
+        """Compatibility wrapper for stopping the ServerState autosave."""
+        return self.server_state.stop_autosave()
 
     def shutdown_storage(self):
         """Drain and save every workspace, not just this server's own state.
 
         ``ServerState.shutdown_storage`` saves the one state it belongs to,
         which on a multi-tenant server holds nothing a tenant wrote. The worker
-        is shared, so draining it once covers every workspace's queued writes;
-        the final save is then per space, or a workspace keeps only whatever
-        happened to reach disk before the drain.
+        is shared, so the drain it performs covers every workspace's queued
+        writes; the final save is then per space, or a workspace keeps only
+        whatever happened to reach disk before the drain.
+
+        Idempotent for the same reason the base is: the graceful stop calls it
+        and the ``atexit`` hook calls it again, and a second pass must not
+        re-save through an executor that is already gone.
         """
-        self.stop_autosave()
-        self.server_state.storage_executor.shutdown(wait=True)
-        for state in self.workspace_env_manager.spaces():
+        if self._workspaces_shut_down:
+            return
+        self._workspaces_shut_down = True
+        self.server_state.shutdown_storage()
+        for _workspace_id, state in self.workspace_env_manager.workspace_spaces():
             if state.env_path is not None:
                 state.storage.save_all(state.state)
             state.dirty_envs.clear()
