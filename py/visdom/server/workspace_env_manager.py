@@ -94,6 +94,8 @@ class WorkspaceState(ServerState):
         self.writes = 0
         self.broadcasts = 0
         self.broadcast_bytes = 0
+        self.active_hour = None
+        self.active_minutes_mask = 0
         if storage_executor is not None:
             # One worker per workspace would mean a thread per tenant held for
             # the life of the process, and the ordering the single worker exists
@@ -103,9 +105,31 @@ class WorkspaceState(ServerState):
 
     def mark_dirty(self, eid):
         """Persist as usual, and remember that this workspace was written to."""
-        self.last_write_at = time.time()
+        now = time.time()
+        self.last_write_at = now
         self.writes += 1
+        self.mark_active_minute(now)
         return super().mark_dirty(eid)
+
+    def mark_active_minute(self, now):
+        """Record that this minute of the hour had work in it.
+
+        Billing wants time spent working, which is not the same as time
+        connected: a dashboard left open overnight is idle, and a run that
+        writes at nine and again at five did not work for eight hours. A minute
+        with at least one write in it is the honest unit, and the smallest one
+        that does not simply restate the write count.
+
+        The hour is held as sixty bits rather than a count so that instances can
+        be combined. Three of them serving the same workspace in the same minute
+        have done one minute of work between them, and a union says so where a
+        sum would say three.
+        """
+        hour = int(now // 3600)
+        if hour != self.active_hour:
+            self.active_hour = hour
+            self.active_minutes_mask = 0
+        self.active_minutes_mask |= 1 << int((now % 3600) // 60)
 
     def record_broadcast(self, messages, size):
         """Note messages pushed to this workspace's viewers.
@@ -166,6 +190,8 @@ class WorkspaceState(ServerState):
             "writes": self.writes,
             "broadcasts": self.broadcasts,
             "broadcast_bytes": self.broadcast_bytes,
+            "active_hour": self.active_hour,
+            "active_minutes_mask": self.active_minutes_mask,
         }
 
 
