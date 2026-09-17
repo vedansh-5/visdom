@@ -1712,6 +1712,8 @@ class ActivityHandler(BaseHandler):
                         "writes": 0,
                         "broadcasts": 0,
                         "broadcast_bytes": 0,
+                        "active_hour": None,
+                        "active_minutes_mask": 0,
                     },
                 )
                 entry["bytes"] = stored["bytes"]
