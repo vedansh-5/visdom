@@ -432,6 +432,12 @@ class Application(tornado.web.Application):
         Building its state to delete from would write a fresh ``main`` into it,
         which would leave a file behind in every dormant workspace this visits.
 
+        ``loaded`` says whether this instance is the one holding the workspace,
+        which the caller needs when instances share a disk: sweeping a workspace
+        from an instance that does not hold it, while another does, deletes a
+        file the holder then writes back from memory. Asking each instance first
+        is how the caller finds the right one.
+
         ``dry_run`` reports what would go and touches nothing, which is how this
         is meant to be run first on a deployment holding real work. The count is
         what was handed to the storage worker, which runs the removals in order
@@ -442,6 +448,7 @@ class Application(tornado.web.Application):
         answer = {
             "workspace_id": str(workspace_id),
             "dry_run": bool(dry_run),
+            "loaded": manager.loaded_space(workspace_id) is not None,
             "envs": [item["eid"] for item in expired],
             "bytes": sum(item["bytes"] for item in expired),
             "removed": 0,

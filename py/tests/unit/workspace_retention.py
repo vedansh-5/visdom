@@ -100,6 +100,17 @@ class TestRetention(unittest.TestCase):
         self.assertNotIn("january", space.state)
         self.assertTrue(self.settle(old))
 
+    def test_the_answer_says_whether_this_instance_holds_the_workspace(self):
+        """Instances share a disk, so the caller has to sweep from the holder."""
+        self.write_env("january", days_old=30)
+
+        cold = self.app.retire_workspace(self.workspace, 7, dry_run=True)
+        self.assertFalse(cold["loaded"])
+
+        self.app.workspace_env_manager.space(self.workspace, slug="ws")
+        warm = self.app.retire_workspace(self.workspace, 7, dry_run=True)
+        self.assertTrue(warm["loaded"])
+
     def test_a_workspace_with_no_directory_is_not_an_error(self):
         answer = self.app.retire_workspace("never-seen", 7, dry_run=False)
         self.assertEqual(answer["envs"], [])
