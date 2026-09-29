@@ -1742,6 +1742,65 @@ class MetricsHandler(ActivityHandler):
         self.write(metrics.render(samples))
 
 
+class RetireHandler(BaseHandler):
+    """Removes the environments a workspace's plan no longer keeps.
+
+    The gateway decides who is due and how far back their plan reaches, because
+    it is the one holding plans and workspaces. This end only knows how to find
+    a workspace's aged environments and remove them properly, which is why the
+    retention window arrives in the request rather than being configured here.
+
+    Internal, like the other underscore endpoints. It names a workspace and
+    deletes work inside it, so the proxy keeps it off the public surface and it
+    is reached over the internal network only.
+    """
+
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        workspace_id = (str(payload.get("workspace_id") or "")).strip()
+        if not workspace_id:
+            self.set_status(400)
+            self.write({"error": "workspace_id is required"})
+            return
+
+        older_than_days = payload.get("older_than_days")
+        try:
+            older_than_days = float(older_than_days)
+        except (TypeError, ValueError):
+            self.set_status(400)
+            self.write({"error": "older_than_days must be a number"})
+            return
+        if older_than_days <= 0:
+            self.set_status(400)
+            self.write({"error": "older_than_days must be greater than zero"})
+            return
+
+        retire = getattr(self._app, "retire_workspace", None)
+        if retire is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        self.write(
+            retire(
+                workspace_id,
+                older_than_days,
+                dry_run=bool(payload.get("dry_run", True)),
+            )
+        )
+
+
 class EvictHandler(BaseHandler):
     """Closes the sockets a workspace still has open on this instance.
 
