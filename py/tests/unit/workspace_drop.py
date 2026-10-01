@@ -41,6 +41,7 @@ class TestDrop(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.app = Application(port=8098, env_path=self._tmp.name)
+        self.addCleanup(self.app.shutdown_storage)
         self.manager = self.app.workspace_env_manager
         self.workspace = str(uuid.uuid4())
         self.directory = os.path.join(self._tmp.name, "workspaces", self.workspace)

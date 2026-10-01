@@ -34,6 +34,7 @@ class TestActiveMinutes(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.app = Application(port=8099, env_path=self._tmp.name)
+        self.addCleanup(self.app.shutdown_storage)
 
     def space(self, workspace_id="ws-a"):
         return self.app.workspace_env_manager.space(workspace_id, slug=workspace_id)

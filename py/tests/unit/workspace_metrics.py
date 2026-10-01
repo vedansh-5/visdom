@@ -90,6 +90,7 @@ class TestCounting(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.app = Application(port=8097, env_path=self._tmp.name)
+        self.addCleanup(self.app.shutdown_storage)
 
     def space(self, workspace_id):
         return self.app.workspace_env_manager.space(workspace_id)
@@ -173,6 +174,7 @@ class TestWorkspacesOnlyOnDisk(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.app = Application(port=8097, env_path=self._tmp.name)
+        self.addCleanup(self.app.shutdown_storage)
 
     def gather(self):
         from visdom.server.handlers.web_handlers import ActivityHandler
