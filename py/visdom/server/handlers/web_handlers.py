@@ -13,6 +13,7 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import asyncio
 import copy
 import getpass
 import hmac
@@ -1799,6 +1800,46 @@ class RetireHandler(BaseHandler):
                 dry_run=bool(payload.get("dry_run", True)),
             )
         )
+
+
+class DropHandler(BaseHandler):
+    """Removes a whole workspace from this instance, files included.
+
+    Called by the gateway once a workspace's rows are gone for good: emptied
+    from the trash, or taken with a deleted account. Internal like the other
+    underscore endpoints, and kept off the public surface by the proxy.
+    """
+
+    _app = None
+
+    def initialize(self, app=None):
+        self._app = app
+
+    async def post(self):
+        try:
+            payload = tornado.escape.json_decode(self.request.body or b"{}")
+        except ValueError:
+            self.set_status(400)
+            self.write({"error": "body must be JSON"})
+            return
+
+        drop = getattr(self._app, "drop_workspace", None)
+        if drop is None:
+            self.set_status(503)
+            self.write({"error": "this server has no workspace manager"})
+            return
+
+        try:
+            answer, pending = drop(payload.get("workspace_id"))
+        except ValueError as exc:
+            self.set_status(400)
+            self.write({"error": str(exc)})
+            return
+
+        freed = await asyncio.wrap_future(pending)
+        answer["removed"] = freed is not None
+        answer["bytes"] = freed or 0
+        self.write(answer)
 
 
 class EvictHandler(BaseHandler):
