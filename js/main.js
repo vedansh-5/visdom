@@ -40,7 +40,6 @@ import {
   DEFAULT_LAYOUT,
   MARGIN,
   PANE_SIZE,
-  PANE_TITLE_BAR_HEIGHT,
   PANES,
   ROW_HEIGHT,
 } from './settings';
@@ -100,6 +99,7 @@ const PaneWrapper = React.memo(
     defaultHeight,
   }) {
     const { width, height, ref } = useResizeDetector();
+    const PANE_TITLE_BAR_HEIGHT = 14;
 
     const finalWidth =
       width !== undefined && width > 0 ? width - 2 : defaultWidth;
@@ -348,8 +348,7 @@ const App = () => {
           h = PANE_SIZE[newPane.type][1];
 
         if (newPane.width) w = p2w(newPane.width);
-        if (newPane.height)
-          h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
+        if (newPane.height) h = Math.ceil(p2h(newPane.height + 14));
         if (newPane.content && newPane.content.caption) h += 1;
 
         _bin.current.content.push({
@@ -378,8 +377,7 @@ const App = () => {
     } else {
       let currLayout = getLayoutItem(newLayout, newPane.id);
       if (newPane.width) currLayout.w = p2w(newPane.width);
-      if (newPane.height)
-        currLayout.h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
+      if (newPane.height) currLayout.h = Math.ceil(p2h(newPane.height + 14));
       if (newPane.content && newPane.content.caption) currLayout.h += 1;
     }
   };
@@ -691,7 +689,7 @@ const App = () => {
       // resets to default layout (same as during pane creation)
       panelayout.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
       panelayout.h = pane.height
-        ? Math.ceil(p2h(pane.height + PANE_TITLE_BAR_HEIGHT))
+        ? Math.ceil(p2h(pane.height + 14))
         : PANE_SIZE[pane.type][1];
       if (pane.content && pane.content.caption) panelayout.h += 1;
 
@@ -1235,20 +1233,28 @@ const App = () => {
       {modals}
       <div className="navbar-form navbar-default">
         <span className="navbar-brand visdom-title">visdom</span>
-        <span className="topbar-divider" />
+        <span className="vertical-line" />
+        &nbsp;&nbsp;
         {envControls}
-        <span className="topbar-divider" />
+        &nbsp;&nbsp;
+        <span className="vertical-line" />
+        &nbsp;&nbsp;
         {viewControls}
-        <span className="topbar-spacer" />
-        {filterControl}
-        <span className="topbar-divider" />
-        {window.VISDOM_CLOUD ? (
-          <>
-            <WorkspaceBadge slug={window.VISDOM_CLOUD.slug} />
-            <span className="topbar-divider" />
-          </>
-        ) : null}
-        {connectionIndicator}
+        <span
+          style={{
+            float: 'right',
+          }}
+        >
+          {filterControl}
+          &nbsp;&nbsp;
+          {window.VISDOM_CLOUD ? (
+            <>
+              <WorkspaceBadge slug={window.VISDOM_CLOUD.slug} />
+              &nbsp;&nbsp;
+            </>
+          ) : null}
+          {connectionIndicator}
+        </span>
       </div>
       <div
         tabIndex="-1"

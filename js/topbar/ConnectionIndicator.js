@@ -15,27 +15,19 @@ function ConnectionIndicator(props) {
   const readonly = sessionInfo.readonly;
   const { onClick } = props;
 
-  const label = connected ? (readonly ? 'readonly' : 'online') : 'offline';
-  const title = connected
-    ? readonly
-      ? 'Read-only connection'
-      : 'Connected'
-    : 'Disconnected -- click to reconnect';
-
   // rendering
   // ---------
   return (
     <button
-      className={classNames('btn', 'btn-sm', 'topbar-conn', {
-        'topbar-conn-warn': connected && readonly,
-        'topbar-conn-ok': connected && !readonly,
-        'topbar-conn-off': !connected,
+      className={classNames({
+        btn: true,
+        'btn-warning': connected && readonly,
+        'btn-success': connected && !readonly,
+        'btn-danger': !connected,
       })}
-      title={title}
       onClick={onClick}
     >
-      <span className="topbar-conn-dot" />
-      {label}
+      {connected ? (readonly ? 'readonly' : 'online') : 'offline'}
     </button>
   );
 }
