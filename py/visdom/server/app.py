@@ -89,6 +89,7 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
     DEFAULT_SAVE_INTERVAL,
     DEFAULT_SAVE_THRESHOLD,
+    WEBSOCKET_PING_INTERVAL,
 )
 
 DROPPED_REASON = "this workspace has been deleted"
@@ -175,6 +176,10 @@ class Application(tornado.web.Application):
         self.wrap_socket = use_frontend_client_polling
 
         settings = dict(tornado_settings)
+        # Polling wrappers are reaped by ``ServerState`` instead; this reaches
+        # only real websockets. The pong deadline is left at tornado's default,
+        # which is the interval itself.
+        settings["websocket_ping_interval"] = WEBSOCKET_PING_INTERVAL
 
         if user_credential:
             self.login_enabled = True
@@ -211,6 +216,7 @@ class Application(tornado.web.Application):
         self.server_state.workspace_manager = self.workspace_manager
         self.server_state.workspace_env_manager = self.workspace_env_manager
         self._workspaces_shut_down = False
+        self._workspaces_shutdown_lock = threading.Lock()
 
         settings["static_url_prefix"] = self.base_url + "/static/"
         # A traceback and the raw request are debugging aids, not something to
@@ -569,16 +575,23 @@ class Application(tornado.web.Application):
         Idempotent for the same reason the base is: the graceful stop calls it
         and the ``atexit`` hook calls it again, and a second pass must not
         re-save through an executor that is already gone.
+
+        Only a pass in which every save succeeded counts as shut down, the same
+        rule the base follows. If any save raises, the ``atexit`` call runs the
+        whole thing again instead of returning early with a workspace's changes
+        still only in memory. The lock keeps two callers from writing the same
+        files at once while the flag is still clear.
         """
-        if self._workspaces_shut_down:
-            return
-        self._workspaces_shut_down = True
-        self.server_state.shutdown_storage()
-        for _workspace_id, state in self.workspace_env_manager.workspace_spaces():
-            if state.env_path is not None:
-                state.storage.save_all(state.state)
-            state.dirty_envs.clear()
-            state.saving_envs.clear()
+        with self._workspaces_shutdown_lock:
+            if self._workspaces_shut_down:
+                return
+            self.server_state.shutdown_storage()
+            for _workspace_id, state in self.workspace_env_manager.workspace_spaces():
+                if state.env_path is not None:
+                    state.storage.save_all(state.state)
+                state.dirty_envs.clear()
+                state.saving_envs.clear()
+            self._workspaces_shut_down = True
 
     def save_layouts(self, layouts=None):
         """Compatibility wrapper for callers that still use ``Application``."""
