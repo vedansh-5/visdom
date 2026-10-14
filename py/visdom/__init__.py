@@ -679,17 +679,24 @@ def _validate_curve_range(values, name):
         raise ValueError("{} should be within [0, 1]".format(name))
 
 
-def _curve_legend(legend, default_legend):
-    """Return user-provided legend or default 2-element list."""
-    if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+def _curve_legend(legend, default_legend, required=None):
+    """Return exactly ``required`` legend labels (defaults to the length of
+    ``default_legend``), falling back to the defaults if too few are given."""
+    if required is None:
+        required = len(default_legend)
+    if not isinstance(legend, (tuple, list)) or len(legend) < required:
         if legend is not None:
             warnings.warn(
-                "legend should be a list/tuple with at least 2 elements, "
-                "falling back to default: {}".format(default_legend),
+                "legend should be a list/tuple with at least {} element{}, "
+                "falling back to default: {}".format(
+                    required,
+                    "" if required == 1 else "s",
+                    default_legend[:required],
+                ),
                 UserWarning,
             )
-        return list(default_legend)
-    return list(legend)
+        return list(default_legend[:required])
+    return list(legend[:required])
 
 
 def _trapz_area(y, x):
@@ -1941,7 +1948,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = str(loadfile(svgfile))
+            svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
         svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
@@ -2272,7 +2279,7 @@ class Visdom(object):
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
@@ -2669,7 +2676,7 @@ class Visdom(object):
         # backward-compatibility with OpenCV.
         if np.issubdtype(tensor.dtype, np.floating):
             tensor = 255 * tensor
-        tensor = tensor.astype(np.uint8).clip(0, 255)
+        tensor = tensor.clip(0, 255).astype(np.uint8)
 
         # Use BGR for backward-compatibility with OpenCV
         pixelformats = {1: "gray", 3: "bgr24"}
@@ -2982,7 +2989,7 @@ class Visdom(object):
 
         is3d = X.shape[1] == 3
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         if opts.get("textlabels") is None:
             opts["mode"] = opts.get("mode", "markers")
         else:
@@ -3236,7 +3243,7 @@ class Visdom(object):
         if Z is not None:
             assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
         if Z is not None and opts["fillarea"]:
@@ -3376,12 +3383,16 @@ class Visdom(object):
         Draw a precision-recall curve for binary classification.
 
         You can either provide raw labels/scores (`y_true`, `y_score`) or
-        precomputed points (`precision`, `recall`).
+        precomputed points (`precision`, `recall`). A baseline showing the
+        true class prevalence is only drawn for the `y_true`/`y_score`
+        path, since prevalence cannot be recovered from `precision`/
+        `recall` points alone.
 
         The following `opts` are supported:
 
         - `opts.title`      : plot title (`string`; default includes PR-AUC)
-        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.legend`     : two legend labels for curve and baseline
+          (`list`); only one label is needed when no baseline is drawn
         - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
         - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
         - `opts.layoutopts` : additional backend layout options (`dict`)
@@ -3418,19 +3429,25 @@ class Visdom(object):
 
         auc = _average_precision(precision, recall)
 
-        opts = dict(opts)
-        opts["xlabel"] = opts.get("xlabel", "Recall")
-        opts["ylabel"] = opts.get("ylabel", "Precision")
-        opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
-        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
-
         if has_raw:
             y_true_arr = np.ravel(np.asarray(y_true))
             positive_rate = float(np.mean(y_true_arr == pos_label))
         else:
-            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+            # Precision/recall alone don't preserve class counts, so
+            # prevalence can't be recovered from them.
+            positive_rate = None
 
         baseline = [positive_rate, positive_rate] if positive_rate is not None else None
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Recall")
+        opts["ylabel"] = opts.get("ylabel", "Precision")
+        opts["legend"] = _curve_legend(
+            opts.get("legend"),
+            ["PR", "Baseline"],
+            required=2 if baseline is not None else 1,
+        )
+        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
 
         data = [
             {
@@ -3770,7 +3787,8 @@ class Visdom(object):
         - `opts.stacked` : stack multiple columns in `X`
             - `opts.legend`  : `list` containing legend labels
         """
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             if opts is not None and opts.get("legend") is not None:
@@ -3782,7 +3800,7 @@ class Visdom(object):
             else:
                 X = X[:, None]
         if Y is not None:
-            Y = np.squeeze(Y)
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
             assert Y.ndim == 1, "Y should be one-dimensional"
             assert len(X) == len(Y), "sizes of X and Y should match"
         else:
@@ -3836,8 +3854,7 @@ class Visdom(object):
 
         - `opts.numbins`: number of bins (`number`; default = 30)
         """
-
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1, "X should be one-dimensional"
 
         opts = {} if opts is None else opts
@@ -3875,8 +3892,8 @@ class Visdom(object):
                            `'probability density'`
         """
 
-        X = np.squeeze(np.asarray(X))
-        Y = np.squeeze(np.asarray(Y))
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
         assert len(X) == len(Y), "X and Y should have the same length"
 
@@ -3920,7 +3937,7 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -3971,8 +3988,14 @@ class Visdom(object):
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
-        X = np.squeeze(X)
-        assert X.ndim == 2, "X should be two-dimensional"
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 2, (
+            "X should be two-dimensional; got ndim=%d after squeeze. "
+            "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
+        )
 
         opts = {} if opts is None else opts
         opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
@@ -4159,13 +4182,14 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
 
         if Y is None:
             Y = np.arange(1, X.shape[0] + 1)
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         if Y.ndim == 1:
             Y = Y[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
@@ -4282,7 +4306,7 @@ class Visdom(object):
                 values = np.asarray(values, dtype=np.float64)
             except (TypeError, ValueError):
                 raise AssertionError("values must be numeric")
-            values = np.squeeze(values)
+            values = np.atleast_1d(np.squeeze(values))
             assert values.ndim == 1, "values should be one-dimensional"
             assert len(values) == len(
                 labels
@@ -4313,7 +4337,7 @@ class Visdom(object):
         - `opts.legend`: `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1, "X should be one-dimensional"
         assert np.all(np.greater_equal(X, 0)), "X cannot contain negative values"
 
@@ -4698,9 +4722,9 @@ class Visdom(object):
         `X` represents one experiment and each column represents a dimension
         (e.g., a hyperparameter or metric).
 
-        An optional `N`-length vector `Y` supplies per-experiment color values
-        (e.g., accuracy or loss) so that the lines are shaded according to
-        a continuous colorscale.
+        An optional `N`-length vector or scalar (for `N=1`) `Y` supplies
+        per-experiment color values (e.g., accuracy or loss) so that the lines
+        are shaded according to a continuous colorscale.
 
         The following `opts` are supported:
 
@@ -4729,7 +4753,7 @@ class Visdom(object):
         assert M >= 2, "X must have at least 2 dimensions (columns)"
 
         if Y is not None:
-            Y = np.squeeze(np.asarray(Y, dtype=float))
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y, dtype=float)))
             assert Y.ndim == 1, "Y must be a 1D vector"
             assert (
                 len(Y) == N
@@ -4958,7 +4982,8 @@ class Visdom(object):
         """
         This function renders structured data as a styled HTML table.
 
-        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+        - `data`: a 2D `list`/`tuple` of row data (each row a `list`,
+           `tuple` or 1-D numpy array), a 2D numpy array, or
            a list of `dict`s (in which case `headers` is derived from
            the first dict's keys unless explicitly given). In case of
            an empty list, a table with only headers will be rendered.
@@ -5025,7 +5050,8 @@ class Visdom(object):
         """
         Renders a native, structured, editable table pane.
 
-        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+        - `data`: a 2D list of rows (list of lists, tuples or 1-D numpy
+           arrays), a 2D numpy array, OR a list of
            dicts (in which case `headers` is derived from the first
            dict's keys unless explicitly given).
         - `headers`: list of column names. Required if `data` rows are
