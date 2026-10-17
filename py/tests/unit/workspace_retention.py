@@ -117,6 +117,21 @@ class TestRetention(unittest.TestCase):
         self.assertEqual(answer["envs"], [])
         self.assertEqual(answer["removed"], 0)
 
+    def test_a_workspace_id_cannot_reach_outside_the_workspaces_folder(self):
+        outside = os.path.join(self._tmp.name, "outside")
+        os.makedirs(outside)
+        stray = os.path.join(outside, "january.json")
+        with open(stray, "w") as handle:
+            json.dump({"jsons": {}, "reload": {}}, handle)
+        when = time.time() - (30 * DAY)
+        os.utime(stray, (when, when))
+
+        for workspace_id in ["../outside", "..", "a/b", ""]:
+            with self.subTest(workspace_id=workspace_id):
+                with self.assertRaises(ValueError):
+                    self.app.retire_workspace(workspace_id, 7, dry_run=False)
+        self.assertTrue(os.path.exists(stray))
+
     def test_no_window_means_keep_everything(self):
         """An unlimited plan passes no window, and nothing should age out."""
         old = self.write_env("january", days_old=400)

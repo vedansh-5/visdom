@@ -27,7 +27,7 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 
 import tornado.escape
-from visdom.server import metrics
+from visdom.server import internal, metrics
 from visdom.utils.shared_utils import (
     get_rand_id,
     _coerce_image_slider_index,
@@ -1857,7 +1857,19 @@ class HealthHandler(BaseHandler):
         self.write({"status": "ok"})
 
 
-class ActivityHandler(BaseHandler):
+class InternalHandler(BaseHandler):
+    scope = internal.READ
+
+    def allowed(self):
+        return internal.is_signed(self.request, self.scope)
+
+    def prepare(self):
+        if not self.allowed():
+            self.set_status(401)
+            self.finish({"error": "This endpoint needs a signed request."})
+
+
+class ActivityHandler(InternalHandler):
     """Reports who is connected to each workspace this instance currently holds.
 
     Only ever the instance's own share of them: the proxy hashes each workspace
@@ -1939,6 +1951,9 @@ class MetricsHandler(ActivityHandler):
     network and the proxy keeps it off the public surface.
     """
 
+    def allowed(self):
+        return internal.has_metrics_token(self.request) or super().allowed()
+
     def get(self):
         samples = [metrics.sample_from_activity(entry) for entry in self.gather()]
         # The version parameter is part of the format's content type. Scrapers
@@ -1947,7 +1962,7 @@ class MetricsHandler(ActivityHandler):
         self.write(metrics.render(samples))
 
 
-class RetireHandler(BaseHandler):
+class RetireHandler(InternalHandler):
     """Removes the environments a workspace's plan no longer keeps.
 
     The gateway decides who is due and how far back their plan reaches, because
@@ -1960,6 +1975,7 @@ class RetireHandler(BaseHandler):
     is reached over the internal network only.
     """
 
+    scope = internal.ADMIN
     _app = None
 
     def initialize(self, app=None):
@@ -1997,16 +2013,20 @@ class RetireHandler(BaseHandler):
             self.write({"error": "this server has no workspace manager"})
             return
 
-        self.write(
-            retire(
+        try:
+            answer = retire(
                 workspace_id,
                 older_than_days,
                 dry_run=bool(payload.get("dry_run", True)),
             )
-        )
+        except ValueError as exc:
+            self.set_status(400)
+            self.write({"error": str(exc)})
+            return
+        self.write(answer)
 
 
-class DropHandler(BaseHandler):
+class DropHandler(InternalHandler):
     """Removes a whole workspace from this instance, files included.
 
     Called by the gateway once a workspace's rows are gone for good: emptied
@@ -2014,6 +2034,7 @@ class DropHandler(BaseHandler):
     underscore endpoints, and kept off the public surface by the proxy.
     """
 
+    scope = internal.ADMIN
     _app = None
 
     def initialize(self, app=None):
@@ -2046,7 +2067,7 @@ class DropHandler(BaseHandler):
         self.write(answer)
 
 
-class EvictHandler(BaseHandler):
+class EvictHandler(InternalHandler):
     """Closes the sockets a workspace still has open on this instance.
 
     The gateway calls this the moment a workspace is suspended or moved to the
@@ -2059,6 +2080,7 @@ class EvictHandler(BaseHandler):
     has any business asking for that.
     """
 
+    scope = internal.ADMIN
     _app = None
 
     def initialize(self, app=None):
