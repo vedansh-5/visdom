@@ -313,9 +313,7 @@ class WorkspaceEnvManager:
         """
         if self.base_env_path is None:
             return JSONStore(None)
-        return JSONStore(
-            os.path.join(self.base_env_path, "workspaces", str(workspace_id))
-        )
+        return JSONStore(self._workspace_path(workspace_id))
 
     def workspace_directory(self, workspace_id):
         """Where one workspace's files live, or ``None`` for anything else.
@@ -360,7 +358,7 @@ class WorkspaceEnvManager:
             return []
 
         cutoff = time.time() - (older_than_days * 86400)
-        directory = os.path.join(self.base_env_path, "workspaces", str(workspace_id))
+        directory = self._workspace_path(workspace_id)
         expired = []
         try:
             entries = list(os.scandir(directory))
@@ -383,6 +381,18 @@ class WorkspaceEnvManager:
                 )
         return sorted(expired, key=lambda item: item["last_written"])
 
+    def _workspace_path(self, workspace_id):
+        name = str(workspace_id)
+        root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
+        path = os.path.join(root, name)
+        if (
+            name in ("", ".", "..")
+            or os.path.basename(name) != name
+            or os.path.dirname(os.path.realpath(path)) != root
+        ):
+            raise ValueError("invalid workspace id: {!r}".format(workspace_id))
+        return path
+
     def _create_space(self, workspace_id, slug=None):
         """Build a workspace's state, inheriting the server's configuration.
 
@@ -397,7 +407,7 @@ class WorkspaceEnvManager:
             storage = JSONStore(None)
             env_path = None
         else:
-            env_path = os.path.join(self.base_env_path, "workspaces", str(workspace_id))
+            env_path = self._workspace_path(workspace_id)
             ensure_dir_exists(env_path)
             storage = JSONStore(env_path)
 
