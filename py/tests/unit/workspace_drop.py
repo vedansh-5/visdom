@@ -16,14 +16,18 @@ id it is given must never reach outside the workspaces directory.
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 import uuid
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
 from visdom.server.app import DROPPED_REASON, Application
 from visdom.server.ownership import WS_POLICY_VIOLATION
+from visdom.server.workspace_manager import WorkspaceManager
 
 pytestmark = pytest.mark.unit
 
@@ -132,6 +136,50 @@ class TestDrop(unittest.TestCase):
 
         self.assertEqual(answer["workspace_id"], self.workspace)
         self.assertIsNotNone(freed)
+        self.assertFalse(os.path.exists(self.directory))
+
+    def test_a_workspace_loaded_under_another_spelling_is_still_forgotten(self):
+        space = self.manager.space(self.workspace.upper(), slug="alpha")
+        space.dirty_envs["main"] += 1
+
+        answer, _freed = self.drop()
+
+        self.assertTrue(answer["loaded"])
+        self.assertIsNone(self.manager.loaded_space(self.workspace.upper()))
+        self.app.flush_dirty()
+        self.assertFalse(os.path.exists(self.directory))
+
+    def test_a_dropped_workspace_is_asked_about_again(self):
+        manager = WorkspaceManager(gateway_url="http://gateway:8085")
+        self.app.workspace_manager = manager
+        member = SimpleNamespace(
+            status_code=200,
+            json=lambda: {"workspace_id": self.workspace, "role": "member"},
+        )
+        with mock.patch(
+            "visdom.server.workspace_manager.requests.post", return_value=member
+        ) as post:
+            manager.resolve("key-a", "alpha")
+            self.drop()
+            manager.resolve("key-a", "alpha")
+
+        self.assertEqual(post.call_count, 2)
+
+    def test_a_directory_removed_by_another_instance_is_not_an_error(self):
+        self.write_env("main")
+        remove = shutil.rmtree
+
+        def taken_first(path):
+            remove(path)
+            raise FileNotFoundError(path)
+
+        with mock.patch(
+            "visdom.server.workspace_env_manager.shutil.rmtree",
+            side_effect=taken_first,
+        ):
+            _answer, freed = self.drop()
+
+        self.assertIsNone(freed)
         self.assertFalse(os.path.exists(self.directory))
 
 

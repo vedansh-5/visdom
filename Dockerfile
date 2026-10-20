@@ -1,26 +1,25 @@
-# Build the visdom frontend bundle, then install and run the server.
-# Stage 1 — build the web assets (gitignored, produced by webpack).
 FROM node:22-slim AS frontend
 WORKDIR /src
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY package.json ./
+RUN npm install
 COPY . .
 RUN npm run build
 
-# Stage 2 — python runtime with the built assets.
 FROM python:3.12-slim
 WORKDIR /app
-COPY --from=frontend /src /app
+COPY . .
+COPY --from=frontend /src/py/visdom/static py/visdom/static
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && pip install --no-cache-dir . \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
+RUN python -c "from visdom.server.build import download_scripts; download_scripts()"
+RUN ln -s /data /root/.visdom
 
-# All runtime config comes from the environment (see the compose .env).
-ENV VISDOM_PORT=8097 \
-    VISDOM_BASE_URL=/vis \
-    VISDOM_ENV_PATH=/data/envs \
-    VISDOM_GATEWAY_URL=http://gateway:8085
-
+ENV PYTHONUNBUFFERED=1
 EXPOSE 8097
-CMD ["sh", "-c", "exec python -m visdom.server -port \"${VISDOM_PORT}\" -base_url \"${VISDOM_BASE_URL}\" -env_path \"${VISDOM_ENV_PATH}\""]
+VOLUME /data
+ENTRYPOINT ["python", "-m", "visdom.server", "-env_path", "/data"]
+CMD ["-port", "8097"]

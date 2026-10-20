@@ -21,14 +21,17 @@ Workspace ``None`` maps to the server's own state, so plain single-tenant or
 local visdom behaves exactly as before.
 """
 
+import asyncio
+import json
 import os
 import shutil
 import threading
 import time
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
-from visdom.data_model.json_store import JSONStore
+from visdom.data_model.json_store import HASHED_ENV_RE, JSONStore
 from visdom.server.server_state import ServerState
 from visdom.utils.server_utils import LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists
@@ -65,10 +68,11 @@ def build_state(storage, eager=False, ensure_main=True):
     for eid in storage.list_envs():
         if eager:
             env_data = storage.load_env(eid)
-            state[eid] = {
-                "jsons": env_data.get("jsons", {}),
-                "reload": env_data.get("reload", {}),
-            }
+            if not isinstance(env_data, dict):
+                env_data = {}
+            state[eid] = dict(env_data)
+            state[eid].setdefault("jsons", {})
+            state[eid].setdefault("reload", {})
         else:
             state[eid] = LazyEnvData(storage, eid)
     if ensure_main and "main" not in state:
@@ -80,7 +84,7 @@ def build_state(storage, eager=False, ensure_main=True):
 class WorkspaceState(ServerState):
     """One workspace's state, and what an operator can ask about it.
 
-    A ``ServerState`` in every respect the handlers care about. The additions
+    A ServerState in every respect the handlers care about. The additions
     are the slug, which the proxy hashes on and this process would otherwise
     never learn, and enough activity to answer whether anyone is using the
     workspace at all.
@@ -198,21 +202,26 @@ class WorkspaceState(ServerState):
 
 
 class WorkspaceEnvManager:
-    def __init__(self, base_env_path, default_state, eager=False):
+    def __init__(self, base_env_path, default_state, eager=False, live_queue=None):
         self.base_env_path = base_env_path
         self.default_state = default_state
         self.eager = eager
+        self.live_queue = live_queue
         self._states = {None: default_state}
         self._lock = threading.Lock()
         self._disk_lock = threading.Lock()
+        self._scan_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="workspace-scan"
+        )
         self._disk_cache = {}
         self._disk_scanned_at = None
 
     def space(self, workspace_id, slug=None):
         """Return the state for a workspace id, creating it on first use.
-        ``None`` returns the server's own (default) state."""
+        None returns the server's own (default) state."""
         if workspace_id is None:
             return self._states[None]
+        workspace_id = canonical_id(workspace_id)
         with self._lock:
             state = self._states.get(workspace_id)
             if state is None:
@@ -241,10 +250,20 @@ class WorkspaceEnvManager:
                 (wid, state) for wid, state in self._states.items() if wid is not None
             ]
 
+    async def on_scan_thread(self, fn, *args):
+        return await asyncio.get_running_loop().run_in_executor(
+            self._scan_pool, fn, *args
+        )
+
+    async def stored_workspaces_off_loop(self):
+        return await asyncio.get_running_loop().run_in_executor(
+            self._scan_pool, self.stored_workspaces
+        )
+
     def stored_workspaces(self):
         """Every workspace with a directory on disk, with its size and last write.
 
-        ``workspace_spaces`` only knows the workspaces something has touched since
+        workspace_spaces only knows the workspaces something has touched since
         this process started, so on its own it reports a freshly restarted server
         as having no workspaces at all. Disk is the durable record, and it is what
         makes a dormant workspace distinguishable from one that has merely not
@@ -291,7 +310,7 @@ class WorkspaceEnvManager:
         with self._disk_lock:
             self._disk_cache = found
             self._disk_scanned_at = now
-        return found
+            return self._disk_cache
 
     def loaded_space(self, workspace_id):
         """The state for a workspace only if something has already built it.
@@ -302,7 +321,7 @@ class WorkspaceEnvManager:
         been dormant, so a tidy-up would leave a file behind everywhere it went.
         """
         with self._lock:
-            return self._states.get(workspace_id)
+            return self._states.get(canonical_id(workspace_id))
 
     def workspace_storage(self, workspace_id):
         """A store over one workspace's directory, without building its state.
@@ -313,9 +332,7 @@ class WorkspaceEnvManager:
         """
         if self.base_env_path is None:
             return JSONStore(None)
-        return JSONStore(
-            os.path.join(self.base_env_path, "workspaces", str(workspace_id))
-        )
+        return JSONStore(self._workspace_path(workspace_id))
 
     def workspace_directory(self, workspace_id):
         """Where one workspace's files live, or ``None`` for anything else.
@@ -340,7 +357,7 @@ class WorkspaceEnvManager:
         if workspace_id is None:
             return None
         with self._lock:
-            state = self._states.pop(workspace_id, None)
+            state = self._states.pop(canonical_id(workspace_id), None)
         with self._disk_lock:
             self._disk_scanned_at = None
         return state
@@ -360,7 +377,7 @@ class WorkspaceEnvManager:
             return []
 
         cutoff = time.time() - (older_than_days * 86400)
-        directory = os.path.join(self.base_env_path, "workspaces", str(workspace_id))
+        directory = self._workspace_path(workspace_id)
         expired = []
         try:
             entries = list(os.scandir(directory))
@@ -370,18 +387,30 @@ class WorkspaceEnvManager:
         for entry in entries:
             if not entry.is_file() or not entry.name.endswith(".json"):
                 continue
-            eid = entry.name[: -len(".json")]
-            if eid in keep:
-                continue
             try:
                 stat = entry.stat()
             except OSError:
                 continue
-            if stat.st_mtime < cutoff:
+            if stat.st_mtime >= cutoff:
+                continue
+            eid = _stored_eid(entry)
+            if eid is not None and eid not in keep:
                 expired.append(
                     {"eid": eid, "bytes": stat.st_size, "last_written": stat.st_mtime}
                 )
         return sorted(expired, key=lambda item: item["last_written"])
+
+    def _workspace_path(self, workspace_id):
+        name = canonical_id(workspace_id)
+        root = os.path.realpath(os.path.join(self.base_env_path, "workspaces"))
+        path = os.path.join(root, name)
+        if (
+            name in ("", ".", "..")
+            or os.path.basename(name) != name
+            or os.path.dirname(os.path.realpath(path)) != root
+        ):
+            raise ValueError("invalid workspace id: {!r}".format(workspace_id))
+        return path
 
     def _create_space(self, workspace_id, slug=None):
         """Build a workspace's state, inheriting the server's configuration.
@@ -397,7 +426,7 @@ class WorkspaceEnvManager:
             storage = JSONStore(None)
             env_path = None
         else:
-            env_path = os.path.join(self.base_env_path, "workspaces", str(workspace_id))
+            env_path = self._workspace_path(workspace_id)
             ensure_dir_exists(env_path)
             storage = JSONStore(env_path)
 
@@ -414,16 +443,22 @@ class WorkspaceEnvManager:
             env_path=env_path,
             **settings,
         )
-        # Built by the application against its own state, and safe to share:
-        # the queue carries the environments it was asked about, not a slice of
-        # any one workspace's data.
-        state.live_updates = self.default_state.live_updates
+        state.live_updates = None if self.live_queue is None else self.live_queue(state)
         # A handler bound to this workspace has to be able to rebind, so the
         # managers travel with the state rather than only with the server's.
         state.workspace_manager = getattr(self.default_state, "workspace_manager", None)
         state.workspace_env_manager = self
         state.dirty_envs = Counter()
         return state
+
+
+def canonical_id(workspace_id):
+    if workspace_id is None:
+        return None
+    try:
+        return str(uuid.UUID(str(workspace_id)))
+    except ValueError:
+        return str(workspace_id)
 
 
 def remove_directory(path):
@@ -441,5 +476,22 @@ def remove_directory(path):
                 total += os.path.getsize(os.path.join(root, name))
             except OSError:
                 pass
-    shutil.rmtree(path)
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return None
     return total
+
+
+def _stored_eid(entry):
+    stem = entry.name[: -len(".json")]
+    if not HASHED_ENV_RE.match(entry.name):
+        return stem
+    try:
+        with open(entry.path, "r", encoding="utf-8") as fn:
+            data = json.load(fn)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("name"), str):
+        return data["name"]
+    return stem
