@@ -12,9 +12,13 @@ import tempfile
 import types
 import unittest
 
+import pytest
+
 from visdom.server import metrics
 from visdom.server.app import Application
 from visdom.utils.server_utils import broadcast
+
+pytestmark = pytest.mark.unit
 
 
 class TestRendering(unittest.TestCase):
@@ -119,6 +123,17 @@ class TestCounting(unittest.TestCase):
         self.assertEqual(activity["broadcasts"], 3)
         self.assertEqual(activity["broadcast_bytes"], 15)
 
+    def test_a_broadcast_counts_the_bytes_it_sent(self):
+        space = self.space("ws-a")
+        handler = types.SimpleNamespace(server_state=space, subs=space.subs)
+        space.subs["one"] = types.SimpleNamespace(
+            eid="main", write_message=lambda msg: None
+        )
+
+        broadcast(handler, "é", "main")
+
+        self.assertEqual(space.activity()["broadcast_bytes"], 2)
+
     def test_a_broadcast_nobody_is_watching_counts_nothing(self):
         space = self.space("ws-a")
         handler = types.SimpleNamespace(server_state=space, subs=space.subs)
@@ -156,10 +171,6 @@ class TestCounting(unittest.TestCase):
 
         self.assertEqual(text.count("visdom_workspace_writes_total{"), 2)
         self.assertIn("visdom_workspace_stored_bytes{", text)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestWorkspacesOnlyOnDisk(unittest.TestCase):
@@ -221,3 +232,7 @@ class TestWorkspacesOnlyOnDisk(unittest.TestCase):
         entry = next(e for e in self.gather() if e["workspace_id"] == "ws-b")
 
         self.assertEqual(entry["writes"], 4)
+
+
+if __name__ == "__main__":
+    unittest.main()

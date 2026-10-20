@@ -28,7 +28,7 @@ class TestWorkspaceShutdown(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.app = Application(port=8096, env_path=self._tmp.name)
-        self.space = self.app.workspace_env_manager.space("ws-a", slug="alpha")
+        self.space = self.app.workspace_env_manager.space("ws-a")
         self.saves = []
 
     def flaky(self, fail_first):
@@ -53,6 +53,34 @@ class TestWorkspaceShutdown(unittest.TestCase):
 
         self.app.shutdown_storage()
         self.app.shutdown_storage()
+
+        self.assertEqual(len(self.saves), 1)
+
+    def test_one_workspace_failing_does_not_stop_the_others_saving(self):
+        self.flaky(fail_first=True)
+        self.space.dirty_envs["main"] = 1
+        other = self.app.workspace_env_manager.space("ws-b")
+        other.dirty_envs["main"] = 1
+        other_saves = []
+        other.storage.save_all = other_saves.append
+
+        with self.assertRaises(OSError):
+            self.app.shutdown_storage()
+
+        self.assertEqual(len(other_saves), 1)
+        self.assertFalse(other.dirty_envs)
+        self.assertIn("main", self.space.dirty_envs)
+
+    def test_a_failed_server_save_still_saves_every_workspace(self):
+        self.flaky(fail_first=False)
+
+        def broken_save_all(state):
+            raise OSError("disk full")
+
+        self.app.server_state.storage.save_all = broken_save_all
+
+        with self.assertRaises(OSError):
+            self.app.shutdown_storage()
 
         self.assertEqual(len(self.saves), 1)
 
